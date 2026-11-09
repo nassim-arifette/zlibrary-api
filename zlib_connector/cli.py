@@ -1,99 +1,21 @@
 """CLI adapter. Credentials are prompted, never accepted as command-line flags."""
-import argparse
 import getpass
 import json
-from pathlib import Path
 import re
 import shlex
 import sys
 
-from .client import SUPPORTED_FORMATS
 from .eapi import Client
 from .credentials import load_credentials
 from .errors import ConnectorError
-from .search import SEARCH_ORDERS, SearchFilters, validate_search
+from .search import SearchFilters, validate_search
 from .books import BookReference
 from .diagnostics import KNOWN_DOMAINS, diagnose_domains
-from .library import FAVORITE_ORDERS, HISTORY_ORDERS, booklist_id
+from .library import booklist_id
 from .pagination import validate_page
+from .cli_parser import CATALOG_COMMANDS, DISCOVERY_COMMANDS, LIBRARY_COMMANDS, parser
+from .cli_views import run_catalog_command, run_library_command, show_books
 
-LIBRARY_COMMANDS = ("library", "favorites", "history", "booklists")
-DISCOVERY_COMMANDS = ("similar", "popular", "recommended")
-CATALOG_COMMANDS = ("search", "info", "formats", *DISCOVERY_COMMANDS)
-
-def parser() -> argparse.ArgumentParser:
-    result = argparse.ArgumentParser(prog="zlib-cli", description="Independent Z-Library search/download client. Sessions remain in memory.")
-    result.add_argument("--domain", default=None, help="override the configured site HTTPS origin")
-    result.add_argument("--credentials", type=Path, help="local TOML file (default: credentials.local.toml beside the package)")
-    result.add_argument("--timeout", type=float, default=30, help="request deadline in seconds (default: 30)")
-    commands = result.add_subparsers(dest="command", required=True)
-    for name in ("search", "download"):
-        command = commands.add_parser(name)
-        command.add_argument("query", help="title, author or ISBN; download also accepts ID:HASH or a book URL")
-        command.add_argument("--format", choices=SUPPORTED_FORMATS, action="append", help="format filter; repeat for multiple formats")
-        command.add_argument("--language", action="append", help="language filter, e.g. french; repeat for multiple languages")
-        command.add_argument("--year-from", type=int)
-        command.add_argument("--year-to", type=int)
-        command.add_argument("--order", choices=SEARCH_ORDERS)
-        command.add_argument("--page", type=int, default=1)
-        command.add_argument("--limit", type=int, default=20)
-        command.add_argument("--json", action="store_true", help="machine-readable stdout; prompts stay on stderr")
-        if name == "search":
-            command.add_argument("--with-pagination", action="store_true", help="with --json, return books and pagination metadata")
-            command.add_argument("--anonymous", action="store_true", help="search without loading or sending credentials")
-        if name == "download":
-            command.add_argument("--pick", type=int, help="1-based result number; otherwise prompt")
-            command.add_argument("--output", type=Path, default=Path.cwd(), help="existing destination directory")
-    for name in ("info", "formats"):
-        command = commands.add_parser(name)
-        command.add_argument("reference", help="ID:HASH or a book HTTPS URL on the selected domain")
-        command.add_argument("--anonymous", action="store_true", help="do not load or send credentials")
-        command.add_argument("--json", action="store_true")
-    for name in ("profile", "quota"):
-        commands.add_parser(name).add_argument("--json", action="store_true")
-    for name in DISCOVERY_COMMANDS:
-        command = commands.add_parser(name, help=f"browse {name} books")
-        if name == "similar":
-            command.add_argument("reference", help="ID:HASH or a book URL on the selected domain")
-        if name != "recommended":
-            command.add_argument("--anonymous", action="store_true", help="do not load or send credentials")
-        command.add_argument("--limit", type=int, default=20, help="maximum books shown from the server's list (default: 20)")
-        command.add_argument("--json", action="store_true")
-    for name, orders in (("favorites", FAVORITE_ORDERS), ("history", HISTORY_ORDERS)):
-        command = commands.add_parser(name, help=f"browse account {name}")
-        command.add_argument("--page", type=int, default=1)
-        command.add_argument("--limit", type=int, default=20)
-        command.add_argument("--order", choices=orders, default="saved_date" if name == "favorites" else None)
-        command.add_argument("--json", action="store_true")
-        if name == "favorites":
-            actions = command.add_subparsers(dest="favorite_action")
-            for action in ("add", "remove"):
-                change = actions.add_parser(action, help=f"{action} a book in your account favorites")
-                change.add_argument("reference", help="ID:HASH or a book URL on the selected domain")
-                change.add_argument("--yes", action="store_true", help="apply the account change without prompting")
-                change.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
-    library = commands.add_parser("library", help="overview of favorites, download history and booklists")
-    library.add_argument("--limit", type=int, default=5, help="preview size per book collection")
-    library.add_argument("--json", action="store_true")
-    booklists = commands.add_parser("booklists", help="browse the booklists on your account")
-    booklists.add_argument("--json", action="store_true")
-    booklists.set_defaults(booklist_action="list", page=1)
-    actions = booklists.add_subparsers(dest="booklist_action")
-    list_command = actions.add_parser("list", help="list account booklists")
-    list_command.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
-    show_command = actions.add_parser("show", help="read a booklist's books")
-    show_command.add_argument("booklist_id")
-    show_command.add_argument("--page", type=int, default=1)
-    show_command.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
-    commands.add_parser("auth-test", help="test login using local credentials, then discard the session")
-    commands.add_parser("shell", help="interactive session: log in once, search and download repeatedly")
-    commands.add_parser("check", help="check public HTTPS access without credentials")
-    doctor = commands.add_parser("doctor", help="diagnose real anonymous search on known or specified domains")
-    doctor.add_argument("domains", nargs="*", help="HTTPS origins; defaults to --domain or the known candidates")
-    doctor.add_argument("--workers", type=int, default=4, help="concurrent isolated probes, 1–8 (default: 4)")
-    doctor.add_argument("--json", action="store_true")
-    commands.add_parser("domains", help="list known candidates without probing them").add_argument("--json", action="store_true")
-    return result
 
 def prompt(label: str) -> str:
     print(label, end="", file=sys.stderr, flush=True)
@@ -102,134 +24,11 @@ def prompt(label: str) -> str:
         raise EOFError
     return value.strip()
 
-def show_books(books, *, file=None):
-    file = sys.stdout if file is None else file
-    if not books:
-        print("No books found.", file=file)
-    for index, book in enumerate(books, 1):
-        reference = f" · {book.book_id}:{book.book_hash}" if book.book_id and book.book_hash else ""
-        saved = " [saved]" if book.is_favorite else ""
-        print(f"{index:2}. {book.title}{saved}\n    {book.authors} · {book.year} · {book.language} · {book.extension.upper() or '?'} · {book.size}{reference}", file=file)
 
 def search_filters(args) -> SearchFilters:
     validate_search(args.query, args.page, args.limit)
     return SearchFilters(languages=args.language or (), formats=args.format or (),
                          year_from=args.year_from, year_to=args.year_to, order=args.order)
-
-
-def show_search(client: Client, args, filters: SearchFilters):
-    options = {"filters": filters, "page": args.page, "limit": args.limit}
-    if args.with_pagination:
-        result = client.search_page(args.query, **options)
-        if args.json:
-            print(json.dumps(result.to_dict(), ensure_ascii=False))
-        else:
-            show_books(result.books)
-            print(f"Page {result.page} · total: {result.total_items if result.total_items is not None else 'unknown'}")
-    else:
-        books = client.search(args.query, **options)
-        if args.json:
-            print(json.dumps([book.to_dict() for book in books], ensure_ascii=False))
-        else:
-            show_books(books)
-
-
-def show_book_command(client: Client, args):
-    if args.command == "info":
-        book = client.get_book(args.reference)
-        if args.json:
-            print(json.dumps(book.to_dict(), ensure_ascii=False))
-        else:
-            show_books([book])
-            print(f"Reference: {book.book_id}:{book.book_hash}")
-            for label, value in (("Publisher", book.publisher), ("Edition", book.edition),
-                                 ("Pages", book.pages), ("ISBN-10", book.isbn10), ("ISBN-13", book.isbn13),
-                                 ("Categories", ", ".join(book.categories)), ("Cover", book.cover_url),
-                                 ("Description", book.description)):
-                if value:
-                    print(f"{label}: {value}")
-    else:
-        formats = client.get_formats(args.reference)
-        if args.json:
-            print(json.dumps([item.to_dict() for item in formats], ensure_ascii=False))
-        elif not formats:
-            print("The server reported no alternative formats.")
-        else:
-            for item in formats:
-                support = "" if item.to_dict()["download_supported"] else " (download unsupported)"
-                print(f"{item.book_id}:{item.book_hash} · {item.extension.upper()} · {item.size}{support}")
-
-
-def run_catalog_command(client: Client, args, filters: SearchFilters | None):
-    if args.command == "search":
-        show_search(client, args, filters)
-        return
-    if args.command in ("info", "formats"):
-        show_book_command(client, args)
-        return
-    if args.command == "similar":
-        books = client.get_similar(args.reference)
-    elif args.command == "popular":
-        books = client.get_popular()
-    else:
-        books = client.get_recommendations()
-    books = books[:args.limit]
-    if args.json:
-        print(json.dumps([book.to_dict() for book in books], ensure_ascii=False))
-    else:
-        show_books(books)
-
-
-def run_library_command(client: Client, args):
-    def show_page(page):
-        show_books(page.books)
-        total = page.total_items if page.total_items is not None else "unknown"
-        print(f"Page {page.page} · total: {total}")
-
-    def show_lists(lists):
-        if not lists:
-            print("No booklists found.")
-        for item in lists:
-            count = item.book_count if item.book_count is not None else "unknown"
-            visibility = "unknown" if item.is_public is None else "public" if item.is_public else "private"
-            print(f"{item.booklist_id} · {item.title} · {count} books · {visibility}")
-
-    if args.command == "favorites" and args.favorite_action in ("add", "remove"):
-        result = client.set_favorite(args.reference, saved=args.favorite_action == "add")
-        if args.json:
-            print(json.dumps(result.to_dict()))
-        else:
-            state = "Added to" if result.is_favorite else "Removed from"
-            print(f"{state} favorites: {result.book_id}")
-        return
-
-    if args.command == "library":
-        overview = client.get_library(limit=args.limit)
-        if args.json:
-            print(json.dumps(overview.to_dict(), ensure_ascii=False))
-        else:
-            for title, page in (("Favorites", overview.favorites), ("Download history", overview.history)):
-                print(title)
-                show_page(page)
-            print("Booklists")
-            show_lists(overview.booklists)
-        return
-    if args.command == "booklists" and args.booklist_action != "show":
-        lists = client.get_booklists()
-        if args.json:
-            print(json.dumps([item.to_dict() for item in lists], ensure_ascii=False))
-        else:
-            show_lists(lists)
-        return
-    if args.command == "booklists":
-        page = client.get_booklist_books(args.booklist_id, page=args.page)
-    else:
-        fetch = client.get_favorites if args.command == "favorites" else client.get_history
-        page = fetch(page=args.page, limit=args.limit, order=args.order)
-    if args.json:
-        print(json.dumps(page.to_dict(), ensure_ascii=False))
-    else:
-        show_page(page)
 
 
 def shell(client: Client):
