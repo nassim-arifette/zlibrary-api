@@ -5,6 +5,7 @@ from pathlib import Path
 from .client import SUPPORTED_FORMATS
 from .library import FAVORITE_ORDERS, HISTORY_ORDERS
 from .search import SEARCH_ORDERS
+from .http_cli import add_serve_parser
 
 LIBRARY_COMMANDS = ("library", "favorites", "history", "booklists", "tags")
 DISCOVERY_COMMANDS = ("similar", "popular", "recommended")
@@ -122,4 +123,5 @@ def parser() -> argparse.ArgumentParser:
     doctor.add_argument("--workers", type=int, default=4, help="concurrent isolated probes, 1–8 (default: 4)")
     doctor.add_argument("--json", action="store_true")
     commands.add_parser("domains", help="list known candidates without probing them").add_argument("--json", action="store_true")
+    add_serve_parser(commands)
     return result

@@ -5,9 +5,10 @@ An API, CLI and TUI for Z-Library.
 Search for books, inspect editions, download files and access your favorites,
 booklists and download history.
 
-**Available today:** a Python library, CLI and interactive shell, including
-browsing and updating favorites, reading download history, and creating, editing
-and deleting booklists. The TUI and the HTTP API are planned.
+**Available today:** a Python library, HTTP API, CLI and interactive shell.
+You can manage favorites, booklists and native tags, and read Z-Library's
+download history.
+The full TUI is planned.
 This is an unofficial client.
 
 ## Get started
@@ -228,6 +229,48 @@ Use `--credentials PATH` before the command to select another file. `--domain`
 overrides its configured domain. Anonymous commands and domain diagnostics never
 load the credentials file.
 
+## Run the HTTP API
+
+```sh
+zlib-cli serve
+```
+
+This signs in with your configured account and serves the API at
+`http://127.0.0.1:8000/v1`. Keep the terminal open; press Ctrl+C to stop.
+Use `serve --anonymous` for public search and metadata without loading account
+credentials, or `serve --port 8080` to choose another local port.
+
+The first run creates a private bearer-token file and prints its location.
+Every request needs that token, including the health check and OpenAPI document.
+The token is reused on later runs; `--token-file PATH` selects another file.
+
+For example, read your **Z-Library download history** from Python while the
+signed-in server is running:
+
+```python
+from urllib.request import Request, urlopen
+from zlib_connector.local_state import state_directory
+
+token = (state_directory() / "api-token").read_text().strip()
+request = Request(
+    "http://127.0.0.1:8000/v1/history?page=1&limit=20",
+    headers={"Authorization": f"Bearer {token}"},
+)
+with urlopen(request) as response:
+    print(response.read().decode())
+```
+
+`/v1/search`, `/v1/books/ID/HASH`, `/v1/favorites`, `/v1/booklists` and the other
+routes use the same Python client as the CLI. The API includes account history,
+tags, recommendations and domain diagnostics, plus updates to favorites, tags
+and booklists. Authenticated write requests apply the requested account change
+directly. The [HTTP guide](docs/http-api.md) lists the routes and error behavior.
+
+Use `/v1/openapi.json` for the OpenAPI contract and `/v1/capabilities` to check
+what is implemented. HTTP downloads, uploads and login endpoints are not yet
+available. The server accepts local connections only; browser origins are
+blocked unless you explicitly add `--allow-origin http://localhost:3000`.
+
 ## Use it from Python or a script
 
 ```python
@@ -272,19 +315,17 @@ The next steps focus on your library and reading lists:
 - **Booklists:** move selections between lists, import/export their contents and
   browse public lists. Creating, editing, deleting and adding or removing books
   are available.
-- **Local history:** find downloaded files on your computer and detect missing
-  files or duplicates alongside the account history.
 - **Reading queues:** import a list, choose editions, skip duplicates and follow
   downloads with progress, cancellation and resume where supported.
 - **Persistent sessions:** reuse a login between commands.
-- **TUI and HTTP API:** use Z-Library from an interactive terminal or through
-  documented HTTP endpoints. Both will use the same core as the Python client
-  and CLI.
+- **TUI:** browse and manage collections from an interactive terminal, using the
+  same core as the API and CLI.
+- **HTTP downloads:** track download jobs and retrieve their files through the API.
 - **Uploads:** send a book with its metadata and track its processing, once the
   service's upload flow and destination visibility have been verified.
 
 These are planned features. The current interactive shell is available now; the
-full TUI and HTTP server are not implemented yet.
+full TUI is not implemented yet. The HTTP server is available now.
 
 ## Development
 

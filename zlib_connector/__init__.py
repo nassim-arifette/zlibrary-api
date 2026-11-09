@@ -10,7 +10,7 @@ from .booklists import Booklist, BooklistBook, BooklistBookUpdate, BooklistDelet
 from .pagination import BookPage
 from .my_library import BookTagUpdate, LibraryTags
 from .errors import (
-    AuthenticationError, ChallengeRequired, ConnectorError, DownloadError,
+    AuthenticationError, BooklistNotFoundError, ChallengeRequired, ConnectorError, DownloadError,
     FormatChangedError, MutationUncertainError, NetworkError, RateLimitError,
 )
 
@@ -21,5 +21,5 @@ __all__ = [
     "FavoriteUpdate", "LibraryOverview", "LibraryTags", "BookTagUpdate",
     "DomainDiagnostic", "DomainReport", "diagnose_domains",
     "ConnectorError", "AuthenticationError", "ChallengeRequired", "DownloadError",
-    "FormatChangedError", "MutationUncertainError", "NetworkError", "RateLimitError",
+    "FormatChangedError", "MutationUncertainError", "NetworkError", "RateLimitError", "BooklistNotFoundError",
 ]

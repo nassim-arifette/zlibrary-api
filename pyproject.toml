@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "zlib-connector"
 version = "0.1.0"
-description = "Z-Library API, CLI and TUI for search, downloads, favorites and booklists. Python API and CLI available; TUI and HTTP API planned."
+description = "Z-Library API, CLI and TUI for search, downloads and personal collections. Python API, HTTP API and CLI available; TUI planned."
 requires-python = ">=3.11"
 dependencies = []
 

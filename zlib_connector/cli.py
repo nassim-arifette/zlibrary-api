@@ -14,6 +14,7 @@ from .diagnostics import KNOWN_DOMAINS, diagnose_domains
 from .booklists import BooklistSettings, booklist_entry_id, booklist_id, validate_booklist_changes
 from .pagination import validate_page
 from .my_library import validate_tags
+from .http_cli import run_server
 from .cli_parser import BOOKLIST_MUTATIONS, CATALOG_COMMANDS, DISCOVERY_COMMANDS, LIBRARY_COMMANDS, parser
 from .cli_views import account_confirmation, booklist_options, run_catalog_command, run_library_command, show_books
 
@@ -80,6 +81,9 @@ def shell(client: Client):
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     try:
+        if args.command == "serve":
+            run_server(args, client_factory=Client, credentials_loader=load_credentials, prompt=prompt)
+            return 0
         if args.command == "domains":
             print(json.dumps(list(KNOWN_DOMAINS)) if args.json else "\n".join(KNOWN_DOMAINS))
             return 0

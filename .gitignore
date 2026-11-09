@@ -12,6 +12,9 @@ credentials.local.toml*
 
 .env.*
 
+api-token
+.api-token-*
+
 build/
 
 dist/

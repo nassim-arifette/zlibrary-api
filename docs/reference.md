@@ -2,6 +2,7 @@
 
 For installation and everyday use, start with the [user guide](../README.md).
 This page describes the current Python and CLI contracts and their limitations.
+For the local HTTP server, see the [HTTP API guide](http-api.md).
 
 ## CLI behavior
 
@@ -132,6 +133,8 @@ Clients are synchronous and not thread-safe; use a separate client per session.
 Error types are `AuthenticationError`, `ChallengeRequired`, `RateLimitError`,
 `FormatChangedError`, `NetworkError` and `DownloadError`, all derived from
 `ConnectorError`. Invalid local arguments raise `ValueError`.
+An edit targeting a list absent from the account's editable collection raises
+`BooklistNotFoundError`, a `ValueError` subclass, before any write is attempted.
 
 ## Account collections
 
