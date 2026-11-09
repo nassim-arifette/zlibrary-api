@@ -153,6 +153,24 @@ contain up to 1000 characters and names up to 120. `--color` accepts 0 through 5
 Deletion is permanent on Z-Library and asks for confirmation. As with other
 account changes, scripts must pass `--yes`; add `--json` for the returned result.
 
+### Organize books with tags
+
+```sh
+zlib-cli tags
+zlib-cli tags add "ID:HASH" "To read" "Science"
+zlib-cli tags remove "ID:HASH" "To read"
+```
+
+These are the tags from the website's **My Library**. Adding a tag also saves
+the book to your favorites; the confirmation mentions both changes. Removing a
+tag keeps the favorite. Labels are case-sensitive and can contain spaces when
+quoted. Use the exact label shown by `tags`; the client preserves its spelling.
+
+Use `tags saved-ids` to get the native saved-book identifiers. Each command
+supports `--json`, and tag changes require confirmation or `--yes`.
+Browsing the full native My Library page and searching it by tag are still
+planned; the `library` command currently provides the collection overview above.
+
 ## Find your next book
 
 ```sh
@@ -229,7 +247,7 @@ login examples, return types and errors.
 
 For shell scripts, add `--json` to `search`, `info`, `formats`, `download`,
 `profile`, `quota`, `doctor`, `domains`, `library`, `favorites`, `history` or
-`booklists`, as well as `similar`, `popular` and `recommended`. Search normally returns an array;
+`booklists` or `tags`, as well as `similar`, `popular` and `recommended`. Search normally returns an array;
 `--with-pagination` adds a `books` and `pagination` object. Results go to standard
 output, while prompts and errors go to standard error.
 

@@ -6,7 +6,7 @@ from .client import SUPPORTED_FORMATS
 from .library import FAVORITE_ORDERS, HISTORY_ORDERS
 from .search import SEARCH_ORDERS
 
-LIBRARY_COMMANDS = ("library", "favorites", "history", "booklists")
+LIBRARY_COMMANDS = ("library", "favorites", "history", "booklists", "tags")
 DISCOVERY_COMMANDS = ("similar", "popular", "recommended")
 CATALOG_COMMANDS = ("search", "info", "formats", *DISCOVERY_COMMANDS)
 BOOKLIST_MUTATIONS = ("add", "remove", "create", "edit", "delete")
@@ -63,6 +63,17 @@ def parser() -> argparse.ArgumentParser:
                 change.add_argument("reference", help="ID:HASH or a book URL on the selected domain")
                 change.add_argument("--yes", action="store_true", help="apply the account change without prompting")
                 change.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+    tags = commands.add_parser("tags", help="native My Library tags and saved book IDs")
+    tags.add_argument("--json", action="store_true")
+    tags.set_defaults(tag_action="list")
+    tag_actions = tags.add_subparsers(dest="tag_action")
+    for action in ("list", "saved-ids", "add", "remove"):
+        command = tag_actions.add_parser(action)
+        command.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+        if action in ("add", "remove"):
+            command.add_argument("reference", help="ID:HASH or a book URL on the selected domain")
+            command.add_argument("tags", nargs="+", help="exact tag labels; quote labels containing spaces")
+            command.add_argument("--yes", action="store_true", help="apply the account change without prompting")
     library = commands.add_parser("library", help="overview of favorites, download history and booklists")
     library.add_argument("--limit", type=int, default=5, help="preview size per book collection")
     library.add_argument("--json", action="store_true")
