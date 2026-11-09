@@ -67,6 +67,15 @@ haven't saved your credentials, it prompts for your email and password. Password
 input is hidden. Downloads support **PDF, EPUB and DjVu** and require an existing
 destination folder; `.` means the current folder.
 
+Books are written to disk as they arrive, with progress on stderr when you use
+a terminal. It shows received bytes, average speed and an estimate when the
+server supplies a total size. `--progress` also enables it in scripts;
+`--no-progress` keeps it quiet. JSON results on stdout stay unchanged.
+
+Press Ctrl+C to cancel. The temporary file is removed, and the final file is
+published only after validation. There is no automatic retry or partial-file
+resume yet; a request already sent to Z-Library may have consumed quota.
+
 For a precise edition, use the `book_id` and `book_hash` from a JSON search result
 as `ID:HASH`. Replace that placeholder in these commands with the actual values:
 
@@ -208,6 +217,8 @@ zlib> quit
 
 Result numbers refer to the most recently displayed page. The session ends when
 you leave the shell. Separate CLI commands currently sign in again each time.
+The shell uses the same streaming download and progress display; start it with
+`shell --no-progress` or `shell --progress` to override automatic display.
 
 ## Save your sign-in details locally
 

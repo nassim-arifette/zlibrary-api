@@ -1,6 +1,5 @@
 """JSON API used by the mobile client; HTML login remains a separate handshake."""
 import json
-import re
 from dataclasses import replace
 from pathlib import Path
 from urllib.parse import urlencode, urljoin
@@ -17,6 +16,8 @@ from .booklists import (
 )
 from .pagination import BookPage, validate_page
 from .my_library import BookTagUpdate, LibraryTags, parse_library_tags, parse_saved_book_ids, validate_tags
+from .book_files import save_book
+from .transfer import CancellationToken, ProgressCallback
 
 
 class Client(HtmlClient):
@@ -271,21 +272,22 @@ class Client(HtmlClient):
         self._require_login()
         return parse_books(self._json("eapi/user/book/recommended").get("books"), self.domain)
 
-    def download(self, book: Book | str, destination: str | Path = ".") -> Path:
-        self._require_login()
-        folder = Path(destination).resolve(strict=True)
-        if not folder.is_dir():
-            raise ValueError("The download destination must be an existing directory.")
+    def _download_book(self, book: Book | str) -> Book:
         if isinstance(book, str):
             book = self.get_book(book)
+        elif not isinstance(book, Book):
+            raise ValueError("Download requires a book or an exact book reference.")
         elif not book.extension:
-            if not same_origin(book.url, self.domain):
+            if not isinstance(book.url, str) or not same_origin(book.url, self.domain):
                 raise ValueError("Download requires a book from the selected API domain.")
             book = self.get_book(str(BookReference(book.book_id, book.book_hash)))
-        if (not book.book_id.isascii() or not book.book_id.isdigit()
-                or not re.fullmatch(r"[A-Za-z0-9]+", book.book_hash)
-                or book.extension not in SUPPORTED_FORMATS or not same_origin(book.url, self.domain)):
+        BookReference(book.book_id, book.book_hash)
+        if (not isinstance(book.url, str) or book.extension not in SUPPORTED_FORMATS
+                or not same_origin(book.url, self.domain)):
             raise ValueError("Download requires a supported book returned by this API domain.")
+        return book
+
+    def _download_link(self, book: Book) -> str:
         payload = self._json(f"eapi/book/{book.book_id}/{book.book_hash}/file")
         file = payload.get("file")
         if not isinstance(file, dict):
@@ -298,5 +300,24 @@ class Client(HtmlClient):
         actual_format = str(file.get("extension") or book.extension).lower()
         if actual_format != book.extension:
             raise DownloadError("The download format differs from the selected book.")
-        response = self._transport.request(urljoin(self.domain, link), download=True)
-        return self._save_download(book, folder, response.body)
+        return urljoin(self.domain, link)
+
+    def download(self, book: Book | str, destination: str | Path = ".", *,
+                 progress: ProgressCallback | None = None, cancel: CancellationToken | None = None) -> Path:
+        """Stream and validate an exact edition, then publish it without overwriting."""
+        token = self._download_token(progress, cancel)
+        self._require_login()
+        folder = Path(destination).resolve(strict=True)
+        if not folder.is_dir():
+            raise ValueError("The download destination must be an existing directory.")
+        book = self._download_book(book)
+        token.check()
+
+        def receive(output):
+            token.check()
+            # Opening the local file succeeds before requesting a quota-consuming link.
+            link = self._download_link(book)
+            token.check()
+            self._transport.download_to(link, output, progress=progress, cancel=token)
+
+        return save_book(book.title, book.extension, folder, receive, cancel=token)

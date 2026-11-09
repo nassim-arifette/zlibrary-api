@@ -6,6 +6,7 @@ from .client import SUPPORTED_FORMATS
 from .library import FAVORITE_ORDERS, HISTORY_ORDERS
 from .search import SEARCH_ORDERS
 from .http_cli import add_serve_parser
+from .cli_progress import add_progress_options
 
 LIBRARY_COMMANDS = ("library", "favorites", "history", "booklists", "tags")
 DISCOVERY_COMMANDS = ("similar", "popular", "recommended")
@@ -34,6 +35,7 @@ def parser() -> argparse.ArgumentParser:
             command.add_argument("--with-pagination", action="store_true", help="with --json, return books and pagination metadata")
             command.add_argument("--anonymous", action="store_true", help="search without loading or sending credentials")
         if name == "download":
+            add_progress_options(command)
             command.add_argument("--pick", type=int, help="1-based result number; otherwise prompt")
             command.add_argument("--output", type=Path, default=Path.cwd(), help="existing destination directory")
     for name in ("info", "formats"):
@@ -116,7 +118,7 @@ def parser() -> argparse.ArgumentParser:
         change.add_argument("--yes", action="store_true", help="apply the account change without prompting")
         change.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
     commands.add_parser("auth-test", help="test login using local credentials, then discard the session")
-    commands.add_parser("shell", help="interactive session: log in once, search and download repeatedly")
+    add_progress_options(commands.add_parser("shell", help="interactive session: log in once, search and download repeatedly"))
     commands.add_parser("check", help="check public HTTPS access without credentials")
     doctor = commands.add_parser("doctor", help="diagnose real anonymous search on known or specified domains")
     doctor.add_argument("domains", nargs="*", help="HTTPS origins; defaults to --domain or the known candidates")

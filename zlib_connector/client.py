@@ -1,20 +1,15 @@
 """Synchronous API independent of any UI, web framework or Python CLI."""
 from dataclasses import asdict, dataclass
 from html.parser import HTMLParser
-import io
 import json
-import os
 from pathlib import Path
-import re
-import tempfile
 from urllib.parse import quote, urlencode, urljoin, urlsplit
-import uuid
 import unicodedata
-import zipfile
-import zlib
 
 from .errors import AuthenticationError, ChallengeRequired, DownloadError, FormatChangedError
 from .transport import Transport, validate_url
+from .book_files import save_book, validate_book
+from .transfer import CancellationToken, ProgressCallback
 
 SUPPORTED_FORMATS = ("pdf", "epub", "djvu")
 
@@ -99,22 +94,6 @@ def parse_html(data: bytes, origin: str) -> _Cards:
     parser.feed(page)
     return parser
 
-def validate_book(data: bytes, extension: str) -> None:
-    valid = False
-    if extension == "pdf":
-        valid = data.startswith(b"%PDF-")
-    elif extension == "djvu":
-        valid = data.startswith(b"AT&TFORM") and data[12:16] in (b"DJVU", b"DJVM")
-    elif extension == "epub":
-        try:
-            with zipfile.ZipFile(io.BytesIO(data)) as archive:
-                entry = archive.getinfo("mimetype")
-                valid = entry.file_size <= 100 and archive.read(entry).strip() == b"application/epub+zip"
-        except (zipfile.BadZipFile, KeyError, RuntimeError, OSError, NotImplementedError, EOFError, zlib.error):
-            pass
-    if not valid:
-        raise DownloadError("The site did not return a valid book. Check the session, quota or browser verification.")
-
 class Client:
     """Session-only client. Not thread-safe; use one client per independent session."""
     def __init__(self, domain: str = "https://z-lib.by/", *, timeout: float = 30, transport: Transport | None = None):
@@ -181,44 +160,39 @@ class Client:
             raise FormatChangedError("No recognizable book results. The session may have expired or the site format changed.")
         return [book for book in parsed.books if extension is None or book.extension == extension][:limit]
 
-    def download(self, book: Book, destination: str | Path = ".") -> Path:
+    @staticmethod
+    def _download_token(progress, cancel) -> CancellationToken:
+        if progress is not None and not callable(progress):
+            raise ValueError("Download progress must be a callable or None.")
+        if cancel is not None and not isinstance(cancel, CancellationToken):
+            raise ValueError("Download cancellation requires a CancellationToken.")
+        token = cancel if cancel is not None else CancellationToken()
+        token.check()
+        return token
+
+    def download(self, book: Book, destination: str | Path = ".", *,
+                 progress: ProgressCallback | None = None, cancel: CancellationToken | None = None) -> Path:
+        token = self._download_token(progress, cancel)
         self._require_login()
+        if not isinstance(book, Book):
+            raise ValueError("Download requires a supported Book from this site.")
         validate_url(book.url)
         if not same_origin(book.url, self.domain) or not urlsplit(book.url).path.startswith("/book/") or book.extension not in SUPPORTED_FORMATS:
             raise ValueError("Download requires a supported Book from this site.")
         folder = Path(destination).resolve(strict=True)
         if not folder.is_dir():
             raise ValueError("The download destination must be an existing directory.")
-        response = self._transport.request(book.url)
-        if not same_origin(response.url, self.domain):
-            raise AuthenticationError("The book page moved to another domain. Reconnect using that domain.")
-        parsed = parse_html(response.body, self.domain)
-        if not parsed.download_link:
-            raise DownloadError("No download link available. Check account quota, session or site changes.")
-        response = self._transport.request(urljoin(response.url, parsed.download_link), download=True)
-        return self._save_download(book, folder, response.body)
 
-    @staticmethod
-    def _save_download(book: Book, folder: Path, data: bytes) -> Path:
-        validate_book(data, book.extension)
-        stem = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '_', book.title)[:90].strip(' .') or "book"
-        filename = f"{stem}-{uuid.uuid4().hex[:12]}.{book.extension}"
-        target = folder / filename
-        temporary = None
-        try:
-            with tempfile.NamedTemporaryFile(dir=folder, prefix=".zlib-", suffix=".part", delete=False) as output:
-                temporary = Path(output.name)
-                output.write(data)
-                output.flush()
-                os.fsync(output.fileno())
-            # Atomic publication without overwriting an existing destination.
-            os.link(temporary, target)
-            return target
-        except OSError:
-            raise DownloadError("Could not save the book. Check free space, directory permissions and hard-link support.") from None
-        finally:
-            if temporary is not None:
-                try:
-                    temporary.unlink(missing_ok=True)
-                except OSError:
-                    pass
+        def receive(output):
+            token.check()
+            response = self._transport.request(book.url)
+            token.check()
+            if not same_origin(response.url, self.domain):
+                raise AuthenticationError("The book page moved to another domain. Reconnect using that domain.")
+            parsed = parse_html(response.body, self.domain)
+            if not parsed.download_link:
+                raise DownloadError("No download link available. Check account quota, session or site changes.")
+            self._transport.download_to(urljoin(response.url, parsed.download_link), output,
+                                        progress=progress, cancel=token)
+
+        return save_book(book.title, book.extension, folder, receive, cancel=token)
