@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zlib-connector"
+version = "0.1.0"
+description = "Independent, session-only Z-Library Python API and CLI"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+zlib-cli = "zlib_connector.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["zlib_connector*"]

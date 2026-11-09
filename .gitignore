@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.env
+downloads/
+*.part
+
+credentials.local.toml
+
+credentials.local.toml*
+
+.env.*
+
+build/
+
+dist/
