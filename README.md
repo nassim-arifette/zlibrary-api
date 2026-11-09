@@ -6,8 +6,9 @@ Search for books, inspect editions, download files and access your favorites,
 booklists and download history.
 
 **Available today:** a Python library, CLI and interactive shell, including
-browsing and updating favorites, reading download history and opening your
-booklists. Editing booklists, the TUI and the HTTP API are planned.
+browsing and updating favorites, reading download history, and adding or removing
+books in existing booklists. Creating and renaming lists, the TUI and the HTTP API
+are planned.
 This is an unofficial client.
 
 ## Get started
@@ -124,6 +125,18 @@ account. Scripts must pass `--yes` explicitly and can add `--json` for the resul
 Saved books carry a `[saved]` marker when their state is known. If a connection
 problem leaves an update unconfirmed, check your favorites before trying again.
 
+To add a book to an existing booklist, or remove an entry from it:
+
+```sh
+zlib-cli booklists add BOOKLIST_ID "ID:HASH"
+zlib-cli booklists remove BOOKLIST_ID ENTRY_ID
+```
+
+`booklists show` displays the **Booklist entry** number needed for removal; JSON
+calls it `entry_id`. This number identifies the entry in that list, so it differs
+from the book ID. Both commands ask for confirmation. Use `--yes --json` in a
+script. If an update cannot be confirmed, reopen the list before retrying.
+
 ## Find your next book
 
 ```sh
@@ -222,8 +235,8 @@ For more context on diagnostics and errors, see the [reference](docs/reference.m
 
 The next steps focus on your library and reading lists:
 
-- **Booklists:** create and edit lists, and add or remove books where the service
-  supports those operations. Browsing existing lists is available now.
+- **Booklists:** create, rename and delete lists, manage visibility and move
+  selections between lists. Browsing and adding or removing books are available.
 - **Local history:** find downloaded files on your computer and detect missing
   files or duplicates alongside the account history.
 - **Reading queues:** import a list, choose editions, skip duplicates and follow
