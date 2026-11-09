@@ -10,6 +10,7 @@ from .client import SUPPORTED_FORMATS
 from .eapi import Client
 from .credentials import load_credentials
 from .errors import ConnectorError
+from .search import SEARCH_ORDERS, SearchFilters, validate_search
 
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(prog="zlib-cli", description="Independent Z-Library search/download client. Sessions remain in memory.")
@@ -20,11 +21,16 @@ def parser() -> argparse.ArgumentParser:
     for name in ("search", "download"):
         command = commands.add_parser(name)
         command.add_argument("query", help="title, author or ISBN")
-        command.add_argument("--format", choices=SUPPORTED_FORMATS)
+        command.add_argument("--format", choices=SUPPORTED_FORMATS, action="append", help="format filter; repeat for multiple formats")
+        command.add_argument("--language", action="append", help="language filter, e.g. french; repeat for multiple languages")
+        command.add_argument("--year-from", type=int)
+        command.add_argument("--year-to", type=int)
+        command.add_argument("--order", choices=SEARCH_ORDERS)
         command.add_argument("--page", type=int, default=1)
         command.add_argument("--limit", type=int, default=20)
         command.add_argument("--json", action="store_true", help="machine-readable stdout; prompts stay on stderr")
         if name == "search":
+            command.add_argument("--with-pagination", action="store_true", help="with --json, return books and pagination metadata")
             command.add_argument("--anonymous", action="store_true", help="search without loading or sending credentials")
         if name == "download":
             command.add_argument("--pick", type=int, help="1-based result number; otherwise prompt")
@@ -41,15 +47,41 @@ def prompt(label: str) -> str:
         raise EOFError
     return value.strip()
 
-def show_books(books, *, file=sys.stdout):
+def show_books(books, *, file=None):
+    file = sys.stdout if file is None else file
     if not books:
         print("No supported books found.", file=file)
     for index, book in enumerate(books, 1):
         print(f"{index:2}. {book.title}\n    {book.authors} · {book.year} · {book.language} · {book.extension.upper()} · {book.size}", file=file)
 
+def search_filters(args) -> SearchFilters:
+    validate_search(args.query, args.page, args.limit)
+    return SearchFilters(languages=args.language or (), formats=args.format or (),
+                         year_from=args.year_from, year_to=args.year_to, order=args.order)
+
+
+def show_search(client: Client, args, filters: SearchFilters):
+    options = {"filters": filters, "page": args.page, "limit": args.limit}
+    if args.with_pagination:
+        result = client.search_page(args.query, **options)
+        if args.json:
+            print(json.dumps(result.to_dict(), ensure_ascii=False))
+        else:
+            show_books(result.books)
+            print(f"Page {result.page} · total: {result.total_items if result.total_items is not None else 'unknown'}")
+    else:
+        books = client.search(args.query, **options)
+        if args.json:
+            print(json.dumps([book.to_dict() for book in books], ensure_ascii=False))
+        else:
+            show_books(books)
+
+
 def shell(client: Client):
     books = []
-    print('Commands: search "title or author" | download NUMBER [DIRECTORY] | quit')
+    last_search = None
+    result = None
+    print('Commands: search "query" [filters] | next | prev | download NUMBER [DIRECTORY] | quit')
     while True:
         try:
             args = shlex.split(prompt("zlib> "))
@@ -58,7 +90,27 @@ def shell(client: Client):
             if args == ["quit"] or args == ["exit"]:
                 return
             if args[0] == "search" and len(args) >= 2:
-                books = client.search(" ".join(args[1:]))
+                # Keep unquoted queries usable; parse options when present.
+                search_args = args if any(value.startswith("--") for value in args[1:]) else ["search", " ".join(args[1:])]
+                try:
+                    options = parser().parse_args(search_args)
+                except SystemExit:
+                    continue
+                filters = search_filters(options)
+                result = client.search_page(options.query, filters=filters, page=options.page, limit=options.limit)
+                last_search = (options.query, filters, options.limit)
+                books = result.books
+                show_books(books)
+            elif args in (["next"], ["prev"]):
+                if last_search is None or result is None:
+                    raise ValueError("Run a search first.")
+                page = result.next_page if args[0] == "next" else result.previous_page
+                if page is None:
+                    print("No page available in that direction.")
+                    continue
+                query, filters, limit = last_search
+                result = client.search_page(query, filters=filters, page=page, limit=limit)
+                books = result.books
                 show_books(books)
             elif args[0] == "download" and len(args) in (2, 3):
                 index = int(args[1])
@@ -66,7 +118,7 @@ def shell(client: Client):
                     raise ValueError("Choose a number from the most recent search.")
                 print(client.download(books[index - 1], args[2] if len(args) == 3 else "."))
             else:
-                print('Use: search "query", download NUMBER [DIRECTORY], or quit.', file=sys.stderr)
+                print('Use: search "query" [filters], next, prev, download NUMBER [DIRECTORY], or quit.', file=sys.stderr)
         except (ConnectorError, ValueError, OSError) as error:
             print(f"{type(error).__name__}: {error}", file=sys.stderr)
 
@@ -80,17 +132,12 @@ def main(argv: list[str] | None = None) -> int:
                 print(json.dumps({"reachable": True, "domain": client.domain, "api": "eapi", "search_ok": True, "results": len(books), "authenticated": False}))
             return 0
         if args.command not in ("shell", "auth-test"):
-            if not args.query.strip() or len(args.query.strip()) > 500 or not 1 <= args.page <= 1000 or not 1 <= args.limit <= 50:
-                raise ValueError("Use a query of 1–500 characters, page 1–1000 and limit 1–50.")
+            filters = search_filters(args)
             if args.command == "download" and (not args.output.is_dir() or (args.pick is not None and args.pick < 1)):
                 raise ValueError("Choose an existing output directory and a positive --pick number.")
         if args.command == "search" and args.anonymous:
             with Client(args.domain or "https://z-lib.by/", timeout=args.timeout) as client:
-                books = client.search(args.query, extension=args.format, page=args.page, limit=args.limit)
-                if args.json:
-                    print(json.dumps([book.to_dict() for book in books], ensure_ascii=False))
-                else:
-                    show_books(books)
+                show_search(client, args, filters)
             return 0
         credentials = load_credentials(args.credentials)
         with Client(args.domain or credentials.domain, timeout=args.timeout) as client:
@@ -107,13 +154,10 @@ def main(argv: list[str] | None = None) -> int:
             if args.command == "shell":
                 shell(client)
                 return 0
-            books = client.search(args.query, extension=args.format, page=args.page, limit=args.limit)
             if args.command == "search":
-                if args.json:
-                    print(json.dumps([book.to_dict() for book in books], ensure_ascii=False))
-                else:
-                    show_books(books)
+                show_search(client, args, filters)
                 return 0
+            books = client.search(args.query, filters=filters, page=args.page, limit=args.limit)
             if not books:
                 raise ValueError("No supported books found for this query.")
             if args.pick is None:

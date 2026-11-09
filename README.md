@@ -55,6 +55,22 @@ python -m zlib_connector --domain https://z-lib.by/ check
 ```
 
 Global flags (`--domain`, `--credentials`, `--timeout`) go before the command.
+Repeat `--format` and `--language` to select several formats/languages. Search and
+query-based download also accept `--year-from`, `--year-to` and `--order`:
+
+```powershell
+python -m zlib_connector search "history" --anonymous --language french --language english --format pdf --format epub --year-from 2000 --year-to 2026 --order bestmatch
+python -m zlib_connector search "history" --anonymous --json --with-pagination
+```
+
+Orders are `bestmatch`, `popular`, `date` (recently added), `titleA` (A–Z),
+`title` (Z–A), `year`, `filesize` (largest first), and `filesizeA` (smallest first).
+These are upstream orders; the client does not re-sort only one page. Actual filter
+and ordering behavior can vary by domain. Exact and full-text search are not exposed.
+`--json` retains its original array shape; `--with-pagination` opts into an object
+containing `books` and `pagination`. Missing totals/navigation are `null`, never
+guessed from the number of returned books. Totals describe the upstream result set.
+
 `check` exercises a real public API search, not merely the site's homepage or
 domain listing. `auth-test` validates both login cookies and the account profile.
 
@@ -62,6 +78,9 @@ Interactive mode logs in once and keeps the session until exit:
 
 ```text
 zlib> search "title or author"
+zlib> search "history" --language french --order year
+zlib> next
+zlib> prev
 zlib> download 1 "C:/Books"
 zlib> quit
 ```
@@ -92,6 +111,26 @@ except ConnectorError as error:
 `Client.search()` also works without login where the service allows public search.
 `download()` requires an authenticated session and a `Book` returned by that domain.
 Book records preserve the API's numeric ID and hash independently of website URLs.
+Use `SearchFilters` for the richer interface while keeping existing `search()` calls:
+
+```python
+from zlib_connector import Client, SearchFilters
+
+filters = SearchFilters(languages=("french",), formats=("pdf", "epub"),
+                        year_from=2000, order="bestmatch")
+with Client() as client:
+    page = client.search_page("history", filters=filters, limit=10)
+    print(page.to_dict())
+    # Lazy traversal follows the server's next page, stopping at page 1000.
+    for book in client.iter_search("history", filters=filters, limit=10):
+        print(book.title)
+```
+
+`search()` still returns a list. `search_page()` returns an immutable `SearchPage`;
+`iter_search()` requests each next page only as it is consumed and stops if the
+server provides no next page. The legacy `extension=` and `filters.formats` are
+mutually exclusive. Page bounds remain 1–1000 and page size 1–50.
+
 Clients are synchronous and not thread-safe; use a separate client per session.
 
 Error types are `AuthenticationError`, `ChallengeRequired`, `RateLimitError`,
@@ -132,3 +171,9 @@ end-to-end run on 2026-11-09 successfully logged in on `z-lib.by`, confirmed the
 account through the JSON API, found three EPUB results and downloaded a valid
 407,595-byte EPUB of Jane Austen's *Pride & Prejudice* into `downloads/`.
 No credentials or session URLs were recorded in the verification output.
+
+On 2026-11-09, an anonymous advanced-search check on `z-lib.by` returned three
+results matching the requested English language, PDF/EPUB formats and 2000–2026
+year range, with pagination metadata. The selected `titleA` order was accepted;
+this check does not establish every ordering rule on every mirror. The live API's
+`false` navigation sentinel is covered by a synthetic regression test.

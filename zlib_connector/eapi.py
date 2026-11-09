@@ -6,6 +6,7 @@ from urllib.parse import urljoin
 
 from .client import Book, Client as HtmlClient, SUPPORTED_FORMATS, _clean_text, parse_html, same_origin
 from .errors import AuthenticationError, DownloadError, FormatChangedError, RateLimitError
+from .search import SearchFilters, SearchPage, parse_page, validate_search
 
 
 class Client(HtmlClient):
@@ -40,20 +41,18 @@ class Client(HtmlClient):
             self.close()
             raise
 
-    def search(self, query: str, *, extension: str | None = None, page: int = 1, limit: int = 20) -> list[Book]:
-        """Search the public API; authenticated sessions use the same endpoint."""
-        query = query.strip()
-        if not query or len(query) > 500:
-            raise ValueError("Query must contain 1–500 characters.")
-        if extension is not None and extension not in SUPPORTED_FORMATS:
-            raise ValueError("Supported formats: pdf, epub, djvu.")
-        if not 1 <= page <= 1000 or not 1 <= limit <= 50:
-            raise ValueError("Page must be 1–1000 and result limit 1–50.")
-        form = {"message": query, "page": str(page), "limit": str(limit)}
-        if extension is not None:
-            form["extensions[]"] = extension
-        else:
-            form["extensions[]"] = list(SUPPORTED_FORMATS)
+    def search(self, query: str, *, extension: str | None = None, page: int = 1,
+               limit: int = 20, filters: SearchFilters | None = None) -> list[Book]:
+        """Return books only, preserving the original list-based interface."""
+        return list(self.search_page(query, extension=extension, page=page, limit=limit, filters=filters).books)
+
+    def search_page(self, query: str, *, extension: str | None = None, page: int = 1,
+                    limit: int = 20, filters: SearchFilters | None = None) -> SearchPage:
+        """Search anonymously or signed in, preserving upstream pagination metadata."""
+        query = validate_search(query, page, limit)
+        filters = filters or SearchFilters()
+        form = {"message": query, "page": str(page), "limit": str(limit), **filters.to_form(extension)}
+        formats = (extension,) if extension else filters.formats or SUPPORTED_FORMATS
         payload = self._json("eapi/book/search", form=form)
         rows = payload.get("books")
         if not isinstance(rows, list):
@@ -65,7 +64,7 @@ class Client(HtmlClient):
             book_id = str(row.get("id", ""))
             book_hash = str(row.get("hash", ""))
             fmt = str(row.get("extension", "")).lower()
-            if fmt not in SUPPORTED_FORMATS or (extension and fmt != extension):
+            if fmt not in formats:
                 continue
             if not book_id.isascii() or not book_id.isdigit() or not re.fullmatch(r"[A-Za-z0-9]+", book_hash):
                 raise FormatChangedError("The API returned an invalid book reference.")
@@ -76,10 +75,22 @@ class Client(HtmlClient):
             if not same_origin(href, self.domain):
                 href = urljoin(self.domain, f"book/{book_id}/{book_hash}")
             books.append(Book(title=title, authors=_clean_text(str(row.get("author") or "")), extension=fmt, url=href,
-                              year=str(row.get("year") or ""), language=_clean_text(str(row.get("language") or "")),
-                              size=str(row.get("filesizeString") or row.get("filesize") or ""),
+                              year=_clean_text(str(row.get("year") or "")), language=_clean_text(str(row.get("language") or "")),
+                              size=_clean_text(str(row.get("filesizeString") or row.get("filesize") or "")),
                               book_id=book_id, book_hash=book_hash))
-        return books[:limit]
+        return parse_page(payload, books[:limit], page, limit)
+
+    def iter_search(self, query: str, *, filters: SearchFilters | None = None,
+                    extension: str | None = None, page: int = 1, limit: int = 20):
+        """Yield books lazily; stop when the server supplies no next page or at page 1000."""
+        while True:
+            result = self.search_page(query, filters=filters, extension=extension, page=page, limit=limit)
+            yield from result.books
+            if result.next_page is None or result.next_page > 1000:
+                return
+            if result.next_page <= page:
+                raise FormatChangedError("The API did not advance to the next search page.")
+            page = result.next_page
 
     def download(self, book: Book, destination: str | Path = ".") -> Path:
         self._require_login()
