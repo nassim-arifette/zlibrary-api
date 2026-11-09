@@ -22,3 +22,5 @@ session.json.lock
 build/
 
 dist/
+
+.zlib-jobs/

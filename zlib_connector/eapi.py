@@ -1,5 +1,8 @@
 """JSON API used by the mobile client; HTML login remains a separate handshake."""
+import hashlib
+import hmac
 import json
+import re
 from dataclasses import replace
 from pathlib import Path
 from urllib.parse import urlencode, urljoin
@@ -22,6 +25,21 @@ from .sessions import SessionStore
 
 
 class Client(HtmlClient):
+    def account_fingerprint(self, key: str) -> str:
+        """Identify this verified account locally without revealing its ID or cookies.
+
+        Use a private, persistent random key for each task directory. The result
+        is bound to both that key and the exact site origin; it is stable across
+        authentication-cookie rotation. This method makes no network request.
+        """
+        if not isinstance(key, str) or re.fullmatch(r"[A-Za-z0-9_-]{32,256}", key) is None:
+            raise ValueError("The account scope key must contain 32–256 URL-safe characters.")
+        self._require_login()
+        session = self._transport.export_session(self.domain)
+        account_id = next(cookie.value for cookie in session.cookies if cookie.name == "remix_userid")
+        value = (session.origin + "\0" + account_id).encode("utf-8")
+        return hmac.new(key.encode("ascii"), value, hashlib.sha256).hexdigest()
+
     def _json(self, path: str, *, form=None, json_body=None, method=None, mutation=False) -> dict:
         options = {"follow_redirects": False} if mutation else {}
         if json_body is not None:

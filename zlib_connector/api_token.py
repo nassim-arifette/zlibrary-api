@@ -34,6 +34,11 @@ def _read_token(path: Path) -> str:
     return value
 
 
+def read_api_token(path: Path) -> str:
+    """Read an existing private token; a CLI client never creates server state."""
+    return _read_token(Path(path).expanduser().absolute())
+
+
 def load_api_token(path: Path) -> str:
     """Reuse a private token or publish a new one atomically, without printing it."""
     path = Path(path).expanduser().absolute()

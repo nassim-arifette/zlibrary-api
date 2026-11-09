@@ -314,9 +314,44 @@ and booklists. Authenticated write requests apply the requested account change
 directly. The [HTTP guide](docs/http-api.md) lists the routes and error behavior.
 
 Use `/v1/openapi.json` for the OpenAPI contract and `/v1/capabilities` to check
-what is implemented. HTTP downloads, uploads and login endpoints are not yet
-available. The server accepts local connections only; browser origins are
+what is implemented. Download tasks are available when you enable them below;
+uploads and HTTP login endpoints are still planned. The server accepts local connections only; browser origins are
 blocked unless you explicitly add `--allow-origin http://localhost:3000`.
+
+### Run downloads through the API
+
+Choose an existing folder for the server's downloads:
+
+```sh
+zlib-cli serve --download-dir ./downloads
+```
+
+In another terminal, submit a book reference and keep its returned task ID:
+
+```sh
+zlib-cli jobs add "ID:HASH" --key my-first-download --json
+zlib-cli jobs list
+zlib-cli jobs show TASK_ID --json
+zlib-cli jobs cancel TASK_ID
+zlib-cli jobs file TASK_ID --output .
+```
+
+Replace `ID:HASH` and `TASK_ID` with your book reference and task ID. `jobs file`
+copies a completed download to your chosen folder without downloading it from
+Z-Library again. All `jobs` commands support `--json`.
+
+The server downloads one book at a time. It saves tasks before starting them,
+reports progress and pauses when the account quota is exhausted. After the quota
+renews, use `zlib-cli jobs resume`. Reusing the same `--key` for the same reference
+returns the existing task, including after a server restart.
+
+Closing the server interrupts the active transfer. It does not retry that task;
+unstarted tasks continue when you restart with the same account, domain and
+download folder. Byte-range resume and automatic retries are not available yet.
+
+`jobs` uses the running server's bearer file. For a custom server, place options
+before the action: `zlib-cli jobs --api-url http://127.0.0.1:8080/v1 --token-file PATH list`.
+See the [download task guide](docs/download-tasks.md) for the HTTP and Python API.
 
 ## Use it from Python or a script
 
@@ -338,7 +373,7 @@ login examples, return types and errors.
 For shell scripts, add `--json` to `search`, `info`, `formats`, `download`,
 `profile`, `quota`, `doctor`, `domains`, `library`, `favorites`, `history` or
 `booklists`, `tags`, `login`, `logout`, `status`, `similar`, `popular` or
-`recommended`. Search normally returns an array;
+`recommended`, or any `jobs` action. Search normally returns an array;
 `--with-pagination` adds a `books` and `pagination` object. Results go to standard
 output, while prompts and errors go to standard error.
 
@@ -370,7 +405,8 @@ The next steps focus on your library and reading lists:
   downloads with progress, cancellation and resume where supported.
 - **TUI:** browse and manage collections from an interactive terminal, using the
   same core as the API and CLI.
-- **HTTP downloads:** track download jobs and retrieve their files through the API.
+- **Download events:** stream progress updates to API clients and the TUI;
+  task polling and file retrieval are available.
 - **Uploads:** send a book with its metadata and track its processing, once the
   service's upload flow and destination visibility have been verified.
 

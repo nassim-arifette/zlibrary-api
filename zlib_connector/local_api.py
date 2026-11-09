@@ -1,0 +1,157 @@
+"""Bounded, authenticated client for an already running loopback HTTP API."""
+from contextlib import contextmanager
+import http.client
+import ipaddress
+import json
+from pathlib import Path
+import re
+import time
+from urllib.parse import urlencode, urlsplit
+
+from .api_token import read_api_token
+from .book_files import save_book
+from .errors import ConnectorError, NetworkError
+from .jobs.models import validate_task_id as task_id
+from .network_deadline import ReadDeadline
+from .transport import BOOK_LIMIT, CHUNK_SIZE
+
+
+JSON_LIMIT = 2 * 1024 * 1024
+_FILE_TYPES = {"application/pdf": "pdf", "application/epub+zip": "epub", "image/vnd.djvu": "djvu"}
+_STATUS_MESSAGES = {
+    400: "The local API rejected the request. Check its arguments.",
+    401: "The local API rejected the bearer token. Use the server's token file.",
+    403: "The local API refused this client.",
+    404: "The download task was not found.",
+    409: "The task conflicts with this request or its file is not ready.",
+    410: "The task's completed file is missing or has changed.",
+    503: "Download tasks are disabled, busy or at capacity. Check the server.",
+}
+
+
+class LocalAPIError(ConnectorError):
+    """A local API failure with a safe message, never a reflected response body."""
+
+    def __init__(self, status):
+        self.status = status
+        super().__init__(_STATUS_MESSAGES.get(status, "The local API could not complete the request."))
+
+
+def _address(value):
+    try:
+        if (not isinstance(value, str) or not value.isascii() or len(value) > 2048
+                or any(character.isspace() or ord(character) < 32 for character in value)
+                or any(character in value for character in "\\?#")):
+            raise ValueError
+        parts = urlsplit(value)
+        host = "127.0.0.1" if parts.hostname == "localhost" else parts.hostname
+        address = ipaddress.IPv4Address(host)
+        port = parts.port or 80
+        if (parts.scheme != "http" or not address.is_loopback or parts.username is not None
+                or parts.password is not None or parts.path not in ("", "/", "/v1", "/v1/")
+                or parts.netloc.endswith(":") or parts.port == 0):
+            raise ValueError
+        return str(address), port
+    except (ValueError, TypeError):
+        raise ValueError("Use an HTTP API URL on localhost or an IPv4 loopback address, optionally ending in /v1.") from None
+
+
+class LocalAPI:
+    """No redirects, proxy environment, credential prompts or automatic retries."""
+
+    def __init__(self, url, token_file, *, timeout=30):
+        self._host, self._port = _address(url)
+        if type(timeout) not in (int, float) or not 0 < timeout <= 300:
+            raise ValueError("The local API timeout must be between 0 and 300 seconds.")
+        self._timeout = timeout
+        self._token = read_api_token(token_file)
+
+    @contextmanager
+    def _response(self, method, path, *, body=None, query=None):
+        if method not in ("GET", "POST") or re.fullmatch(r"/downloads(?:/[a-z0-9]+(?:/[a-z]+)?)?", path) is None:
+            raise ValueError("Unsupported local task operation.")
+        target = "/v1" + path
+        if query:
+            target += "?" + urlencode(query)
+        data = json.dumps(body, ensure_ascii=True).encode("ascii") if body is not None else None
+        if data is not None and len(data) > 65536:
+            raise ValueError("The local API request exceeds its size limit.")
+        headers = {"Authorization": "Bearer " + self._token, "Connection": "close", "Accept-Encoding": "identity"}
+        if data is not None:
+            headers["Content-Type"] = "application/json"
+        connection = http.client.HTTPConnection(self._host, self._port, timeout=self._timeout)
+        deadline = time.monotonic() + self._timeout
+        guard = None
+        response = None
+        try:
+            try:
+                connection.connect()
+                guard = ReadDeadline(connection.sock, deadline, None)
+                guard.start()
+                connection.request(method, target, body=data, headers=headers)
+                response = connection.getresponse()
+            except (OSError, http.client.HTTPException):
+                self._network_error(deadline)
+            if not 200 <= response.status < 300:
+                raise LocalAPIError(response.status)
+            lengths = response.headers.get_all("Content-Length", [])
+            if (len(lengths) != 1 or re.fullmatch(r"[0-9]{1,12}", lengths[0]) is None
+                    or response.headers.get("Transfer-Encoding") is not None
+                    or response.headers.get("Content-Encoding", "identity").lower() != "identity"):
+                raise NetworkError("The local API returned unsupported response framing.")
+            yield response, int(lengths[0]), deadline
+        finally:
+            if guard is not None:
+                guard.close()
+            if response is not None:
+                response.close()
+            connection.close()
+
+    @staticmethod
+    def _network_error(deadline):
+        if time.monotonic() >= deadline:
+            raise NetworkError("The local API request timed out.", reason="timeout") from None
+        raise NetworkError("Could not contact the local API. Start zlib-cli serve and check its address.") from None
+
+    @staticmethod
+    def _copy(response, size, deadline, writer):
+        remaining = size
+        while remaining:
+            if time.monotonic() >= deadline:
+                raise NetworkError("The local API request timed out.", reason="timeout")
+            try:
+                chunk = response.read1(min(CHUNK_SIZE, remaining))
+            except (OSError, http.client.HTTPException):
+                LocalAPI._network_error(deadline)
+            if not chunk:
+                if time.monotonic() >= deadline:
+                    LocalAPI._network_error(deadline)
+                raise NetworkError("The local API response ended before the file was complete.")
+            writer(chunk)
+            remaining -= len(chunk)
+
+    def request(self, method, path, *, body=None, query=None):
+        with self._response(method, path, body=body, query=query) as (response, size, deadline):
+            if size > JSON_LIMIT or response.headers.get_content_type() != "application/json":
+                raise NetworkError("The local API returned an unsupported JSON response.")
+            chunks = []
+            self._copy(response, size, deadline, chunks.append)
+            try:
+                value = json.loads(b"".join(chunks))
+            except (ValueError, UnicodeError, RecursionError):
+                raise NetworkError("The local API returned invalid JSON.") from None
+            if not isinstance(value, dict):
+                raise NetworkError("The local API returned an unexpected response.")
+            return value
+
+    def file(self, identifier, folder):
+        identifier = task_id(identifier)
+        folder = Path(folder)
+        if not folder.is_dir():
+            raise ValueError("Choose an existing destination directory.")
+        with self._response("GET", f"/downloads/{identifier}/file") as (response, size, deadline):
+            extension = _FILE_TYPES.get(response.headers.get_content_type())
+            if extension is None or not 0 < size <= BOOK_LIMIT:
+                raise NetworkError("The local API returned an unsupported book file.")
+            return save_book("download-" + identifier, extension, folder,
+                             lambda stream: self._copy(response, size, deadline, stream.write))
