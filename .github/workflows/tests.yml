@@ -33,12 +33,13 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: ${{ matrix.python }}
+      - name: Install package with terminal interface
+        run: python -m pip install ".[tui]"
       - name: Run offline tests
         run: python -m unittest discover -s tests -v
-      - name: Install package
-        run: python -m pip install .
       - name: Check installed CLI outside the source tree
         working-directory: ${{ runner.temp }}
         run: |
           zlib-cli --help
           zlib-cli domains --json
+          zlib-cli tui --help

@@ -16,6 +16,7 @@ from .pagination import validate_page
 from .my_library import validate_tags
 from .http_cli import run_server
 from .cli_jobs import run_jobs
+from .cli_tui import run_tui
 from .cli_progress import ProgressDisplay
 from .cli_session import AccountSession, local_session_command, session_message
 from .transfer import TransferCancelled
@@ -87,6 +88,9 @@ def shell(client: Client, *, progress=None):
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     try:
+        if args.command == "tui":
+            run_tui(args)
+            return 0
         if args.command == "jobs":
             run_jobs(args)
             return 0
