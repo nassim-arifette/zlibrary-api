@@ -3,6 +3,8 @@
 For installation and everyday use, start with the [user guide](../README.md).
 This page describes the current Python and CLI contracts and their limitations.
 For the local HTTP server, see the [HTTP API guide](http-api.md).
+The optional [collections TUI](tui.md) uses this server through a bounded local
+catalog client; ordinary Python and CLI use does not require Textual.
 
 ## CLI behavior
 

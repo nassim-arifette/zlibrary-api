@@ -1,5 +1,6 @@
 """Bounded, authenticated client for an already running loopback HTTP API."""
 from contextlib import contextmanager
+from functools import partial
 import http.client
 import ipaddress
 import json
@@ -15,8 +16,10 @@ from .errors import ConnectorError, NetworkError
 from .jobs.events import validate_event_id
 from .jobs.models import TERMINAL_STATES, validate_task_id as task_id
 from .network_deadline import ReadDeadline
+from .local_http import CancellableResponse
 from .sse import SSEDecoder, event_json, invalid_stream, validate_public_event
 from .transport import BOOK_LIMIT, CHUNK_SIZE
+from .transfer import CancellationToken
 
 
 JSON_LIMIT = 2 * 1024 * 1024
@@ -69,10 +72,21 @@ class LocalAPI:
         self._timeout = timeout
         self._token = read_api_token(token_file)
 
-    @contextmanager
-    def _response(self, method, path, *, body=None, query=None, stream_duration=None, stop_at=None):
+    @staticmethod
+    def _validate_operation(method, path):
         if method not in ("GET", "POST") or re.fullmatch(r"/downloads(?:/[a-z0-9]+(?:/[a-z]+)?)?", path) is None:
             raise ValueError("Unsupported local task operation.")
+
+    @staticmethod
+    def _status_error(status):
+        return LocalAPIError(status)
+
+    @contextmanager
+    def _response(self, method, path, *, body=None, query=None, stream_duration=None, stop_at=None,
+                  cancel: CancellationToken | None = None):
+        self._validate_operation(method, path)
+        if cancel is not None:
+            cancel.check()
         target = "/v1" + path
         if query:
             target += "?" + urlencode(query)
@@ -89,24 +103,30 @@ class LocalAPI:
             deadline = min(deadline, stop_at)
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            self._network_error(deadline)
+            self._network_error(deadline, cancel)
         connection = http.client.HTTPConnection(self._host, self._port, timeout=min(self._timeout, remaining))
+        if cancel is not None:
+            connection.response_class = partial(CancellableResponse, deadline=deadline, cancel=cancel)
         guard = None
         response = None
         try:
             try:
                 connection.connect()
+                if cancel is not None:
+                    cancel.check()
                 # getresponse() can detach a close-delimited socket from the
                 # connection; retain it while the response owns the stream.
                 connected_socket = connection.sock
-                guard = ReadDeadline(connected_socket, deadline, None)
+                guard = ReadDeadline(connected_socket, deadline, cancel)
                 guard.start()
                 connection.request(method, target, body=data, headers=headers)
                 response = connection.getresponse()
             except (OSError, http.client.HTTPException):
-                self._network_error(deadline)
+                self._network_error(deadline, cancel)
+            if cancel is not None:
+                cancel.check()
             if not 200 <= response.status < 300:
-                raise LocalAPIError(response.status)
+                raise self._status_error(response.status)
             if stream_duration is not None:
                 self._event_framing(response)
                 remaining = deadline - time.monotonic()
@@ -123,9 +143,10 @@ class LocalAPI:
                 yield response, None, deadline
             else:
                 lengths = response.headers.get_all("Content-Length", [])
+                encodings = response.headers.get_all("Content-Encoding", [])
                 if (len(lengths) != 1 or re.fullmatch(r"[0-9]{1,12}", lengths[0]) is None
                         or response.headers.get("Transfer-Encoding") is not None
-                        or response.headers.get("Content-Encoding", "identity").lower() != "identity"):
+                        or (encodings and (len(encodings) != 1 or encodings[0].lower() != "identity"))):
                     raise NetworkError("The local API returned unsupported response framing.")
                 yield response, int(lengths[0]), deadline
         finally:
@@ -204,21 +225,29 @@ class LocalAPI:
                         return
 
     @staticmethod
-    def _network_error(deadline):
+    def _network_error(deadline, cancel=None):
+        if cancel is not None:
+            cancel.check()
         if time.monotonic() >= deadline:
             raise NetworkError("The local API request timed out.", reason="timeout") from None
         raise NetworkError("Could not contact the local API. Start zlib-cli serve and check its address.") from None
 
     @staticmethod
-    def _copy(response, size, deadline, writer):
+    def _copy(response, size, deadline, writer, *, cancel=None):
         remaining = size
         while remaining:
+            if cancel is not None:
+                cancel.check()
             if time.monotonic() >= deadline:
                 raise NetworkError("The local API request timed out.", reason="timeout")
             try:
                 chunk = response.read1(min(CHUNK_SIZE, remaining))
             except (OSError, http.client.HTTPException):
-                LocalAPI._network_error(deadline)
+                LocalAPI._network_error(deadline, cancel)
+            if cancel is not None:
+                cancel.check()
+            if time.monotonic() >= deadline:
+                LocalAPI._network_error(deadline, cancel)
             if not chunk:
                 if time.monotonic() >= deadline:
                     LocalAPI._network_error(deadline)
@@ -226,19 +255,27 @@ class LocalAPI:
             writer(chunk)
             remaining -= len(chunk)
 
-    def request(self, method, path, *, body=None, query=None):
-        with self._response(method, path, body=body, query=query) as (response, size, deadline):
-            if size > JSON_LIMIT or response.headers.get_content_type() != "application/json":
+    def _request_json(self, method, path, *, body=None, query=None, cancel=None):
+        with self._response(method, path, body=body, query=query, cancel=cancel) as (response, size, deadline):
+            if (size > JSON_LIMIT or len(response.headers.get_all("Content-Type", [])) != 1
+                    or response.headers.get_content_type() != "application/json"):
                 raise NetworkError("The local API returned an unsupported JSON response.")
             chunks = []
-            self._copy(response, size, deadline, chunks.append)
+            self._copy(response, size, deadline, chunks.append, cancel=cancel)
             try:
-                value = json.loads(b"".join(chunks))
+                value = json.loads(b"".join(chunks).decode("utf-8"), object_pairs_hook=_unique_json_object,
+                                   parse_constant=_invalid_json_constant)
             except (ValueError, UnicodeError, RecursionError):
                 raise NetworkError("The local API returned invalid JSON.") from None
-            if not isinstance(value, dict):
-                raise NetworkError("The local API returned an unexpected response.")
+            if cancel is not None:
+                cancel.check()
             return value
+
+    def request(self, method, path, *, body=None, query=None):
+        value = self._request_json(method, path, body=body, query=query)
+        if not isinstance(value, dict):
+            raise NetworkError("The local API returned an unexpected response.")
+        return value
 
     def file(self, identifier, folder):
         identifier = task_id(identifier)
@@ -251,3 +288,16 @@ class LocalAPI:
                 raise NetworkError("The local API returned an unsupported book file.")
             return save_book("download-" + identifier, extension, folder,
                              lambda stream: self._copy(response, size, deadline, stream.write))
+
+
+def _unique_json_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("Duplicate JSON field.")
+        result[key] = value
+    return result
+
+
+def _invalid_json_constant(_):
+    raise ValueError("Invalid JSON number.")

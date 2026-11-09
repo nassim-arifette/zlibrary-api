@@ -5,10 +5,11 @@ An API, CLI and TUI for Z-Library.
 Search for books, inspect editions, download files and access your favorites,
 booklists and download history.
 
-**Available today:** a Python library, HTTP API, CLI and interactive shell.
+**Available today:** a Python library, HTTP API, CLI, collections TUI and interactive shell.
 You can manage favorites, booklists and native tags, and read Z-Library's
 download history.
-The full TUI is planned.
+The TUI browses favorites, booklists and download history, with book details.
+Search, collection editing and download management in the TUI are still planned.
 This is an unofficial client.
 
 ## Get started
@@ -100,7 +101,32 @@ zlib-cli --domain https://z-lib.by/ quota
 This shows your daily limit, downloads used and downloads remaining. If a counter
 is missing from the response, it appears as `unknown`. Add `--json` for scripts.
 
-## Browse your library
+## Browse in the terminal
+
+Install the optional terminal interface from the project folder:
+
+```sh
+python -m pip install -e ".[tui]"
+```
+
+Start the local API in one terminal, then open the TUI in another:
+
+```sh
+zlib-cli serve
+zlib-cli tui
+```
+
+The server verifies your saved session or asks you to sign in. The TUI uses the
+server's local token file and opens your favorites. Browse your booklists or
+Z-Library download history, open a book's details, and return to the same row.
+You can select another starting view with `zlib-cli tui --view history`.
+
+The interface reads your collections; it does not change your account or start
+downloads. Press `?` for help or Ctrl+P for the command palette and themes. Use
+`--no-color` for monochrome output. See the [TUI guide](docs/tui.md) for navigation,
+server options and troubleshooting.
+
+## Browse your library with commands
 
 ```sh
 zlib-cli library
@@ -408,26 +434,30 @@ The next steps focus on your library and reading lists:
   are available.
 - **Reading queues:** import a list, choose editions, skip duplicates and follow
   downloads with progress, cancellation and resume where supported.
-- **TUI:** browse and manage collections from an interactive terminal, using the
-  same core as the API and CLI.
+- **TUI:** add search, collection editing and account views to the available
+  favorites, booklists, history and book-detail views.
 - **Queue views:** bring live task updates into the TUI and add a feed for the
   whole queue. Per-task SSE updates, polling and file retrieval are available.
 - **Uploads:** send a book with its metadata and track its processing, once the
   service's upload flow and destination visibility have been verified.
 
-These are planned features. The current interactive shell is available now; the
-full TUI is not implemented yet. The HTTP server is available now.
+These additions are planned. The collections TUI, interactive shell and HTTP
+server are available now.
 
 ## Development
 
-The package has no runtime dependencies. Run the tests from the project folder:
+The core package has no runtime dependencies. The optional TUI uses Textual.
+Install it to include the terminal navigation tests, then run the suite:
 
 ```sh
+python -m pip install -e ".[tui]"
 python -m unittest discover -s tests -q
 ```
 
+Without the extra, core tests still run and TUI tests are skipped.
+
 GitHub Actions runs the offline tests on Windows and Linux with Python 3.11 and
-3.14. It also installs the package and checks the installed CLI outside the source
+3.14, with the TUI extra installed. It also checks the installed CLI outside the source
 folder. These checks do not use a Z-Library account or contact its servers.
 CI runs for code, tests, packaging or workflow changes in pull requests; newer
 pushes cancel obsolete runs. Merging the tested branch does not rerun the suite
