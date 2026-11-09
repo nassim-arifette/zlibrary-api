@@ -47,6 +47,13 @@ python -m zlib_connector search "title or author" --format epub --json
 # Download a selected result into an existing directory.
 python -m zlib_connector download "title" --pick 1 --output "C:\Books"
 
+# Inspect a precise edition and query the alternatives reported by the service.
+python -m zlib_connector info "ID:HASH" --anonymous --json
+python -m zlib_connector formats "ID:HASH" --anonymous --json
+
+# Download that exact reference without repeating the search.
+python -m zlib_connector download "ID:HASH" --output "C:\Books"
+
 # Public search without loading the credentials file.
 python -m zlib_connector search "Pride and Prejudice" --anonymous --limit 3
 
@@ -131,6 +138,20 @@ with Client() as client:
 server provides no next page. The legacy `extension=` and `filters.formats` are
 mutually exclusive. Page bounds remain 1–1000 and page size 1–50.
 
+`get_book("ID:HASH")` returns a `BookDetails` record with description, cover URL,
+publisher, edition, pages, categories and identifiers when supplied by the server.
+ISBN-10/13 fields are populated only after checksum validation. Descriptions are
+plain text; missing optional metadata remains empty. `get_formats("ID:HASH")`
+returns `BookFormat` records with each alternative's own ID/hash. An empty list is
+a valid upstream answer; formats beyond PDF/EPUB/DjVu are marked unsupported for
+download. These lookups do not download covers or create account state.
+
+`get_book()`, `get_formats()` and `download()` also accept a book HTTPS URL on the
+selected domain (`/book/ID/HASH[/title]`, without query parameters or a fragment).
+`download()` continues to accept a `Book`. Direct-reference CLI downloads reject
+search filters and `--pick`, ensuring the selected edition cannot silently change.
+`info` and `formats` use the configured account unless `--anonymous` is provided.
+
 Clients are synchronous and not thread-safe; use a separate client per session.
 
 Error types are `AuthenticationError`, `ChallengeRequired`, `RateLimitError`,
@@ -177,3 +198,8 @@ results matching the requested English language, PDF/EPUB formats and 2000–202
 year range, with pagination metadata. The selected `titleA` order was accepted;
 this check does not establish every ordering rule on every mirror. The live API's
 `false` navigation sentinel is covered by a synthetic regression test.
+
+The same day's anonymous check retrieved a matching book-details record and 17
+alternative-format records. Some detail fields were absent and remained empty.
+Direct-reference downloading is covered by synthetic tests through the existing
+validated file-download flow; that check did not consume an account download.

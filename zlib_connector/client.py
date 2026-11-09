@@ -34,7 +34,7 @@ class Book:
     book_id: str = ""
     book_hash: str = ""
 
-    def to_dict(self) -> dict[str, str]:
+    def to_dict(self) -> dict[str, object]:
         return asdict(self)
 
 class _Cards(HTMLParser):

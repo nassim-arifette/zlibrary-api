@@ -3,6 +3,7 @@ import argparse
 import getpass
 import json
 from pathlib import Path
+import re
 import shlex
 import sys
 
@@ -11,6 +12,7 @@ from .eapi import Client
 from .credentials import load_credentials
 from .errors import ConnectorError
 from .search import SEARCH_ORDERS, SearchFilters, validate_search
+from .books import BookReference
 
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(prog="zlib-cli", description="Independent Z-Library search/download client. Sessions remain in memory.")
@@ -20,7 +22,7 @@ def parser() -> argparse.ArgumentParser:
     commands = result.add_subparsers(dest="command", required=True)
     for name in ("search", "download"):
         command = commands.add_parser(name)
-        command.add_argument("query", help="title, author or ISBN")
+        command.add_argument("query", help="title, author or ISBN; download also accepts ID:HASH or a book URL")
         command.add_argument("--format", choices=SUPPORTED_FORMATS, action="append", help="format filter; repeat for multiple formats")
         command.add_argument("--language", action="append", help="language filter, e.g. french; repeat for multiple languages")
         command.add_argument("--year-from", type=int)
@@ -35,6 +37,11 @@ def parser() -> argparse.ArgumentParser:
         if name == "download":
             command.add_argument("--pick", type=int, help="1-based result number; otherwise prompt")
             command.add_argument("--output", type=Path, default=Path.cwd(), help="existing destination directory")
+    for name in ("info", "formats"):
+        command = commands.add_parser(name)
+        command.add_argument("reference", help="ID:HASH or a book HTTPS URL on the selected domain")
+        command.add_argument("--anonymous", action="store_true", help="do not load or send credentials")
+        command.add_argument("--json", action="store_true")
     commands.add_parser("auth-test", help="test login using local credentials, then discard the session")
     commands.add_parser("shell", help="interactive session: log in once, search and download repeatedly")
     commands.add_parser("check", help="check public HTTPS access without credentials")
@@ -75,6 +82,32 @@ def show_search(client: Client, args, filters: SearchFilters):
             print(json.dumps([book.to_dict() for book in books], ensure_ascii=False))
         else:
             show_books(books)
+
+
+def show_book_command(client: Client, args):
+    if args.command == "info":
+        book = client.get_book(args.reference)
+        if args.json:
+            print(json.dumps(book.to_dict(), ensure_ascii=False))
+        else:
+            show_books([book])
+            print(f"Reference: {book.book_id}:{book.book_hash}")
+            for label, value in (("Publisher", book.publisher), ("Edition", book.edition),
+                                 ("Pages", book.pages), ("ISBN-10", book.isbn10), ("ISBN-13", book.isbn13),
+                                 ("Categories", ", ".join(book.categories)), ("Cover", book.cover_url),
+                                 ("Description", book.description)):
+                if value:
+                    print(f"{label}: {value}")
+    else:
+        formats = client.get_formats(args.reference)
+        if args.json:
+            print(json.dumps([item.to_dict() for item in formats], ensure_ascii=False))
+        elif not formats:
+            print("The server reported no alternative formats.")
+        else:
+            for item in formats:
+                support = "" if item.to_dict()["download_supported"] else " (download unsupported)"
+                print(f"{item.book_id}:{item.book_hash} · {item.extension.upper()} · {item.size}{support}")
 
 
 def shell(client: Client):
@@ -131,16 +164,31 @@ def main(argv: list[str] | None = None) -> int:
                 books = client.search("Pride and Prejudice", limit=1)
                 print(json.dumps({"reachable": True, "domain": client.domain, "api": "eapi", "search_ok": True, "results": len(books), "authenticated": False}))
             return 0
-        if args.command not in ("shell", "auth-test"):
+        filters = None
+        reference = None
+        if args.command in ("info", "formats"):
+            reference = args.reference
+        if args.command in ("search", "download"):
             filters = search_filters(args)
             if args.command == "download" and (not args.output.is_dir() or (args.pick is not None and args.pick < 1)):
                 raise ValueError("Choose an existing output directory and a positive --pick number.")
-        if args.command == "search" and args.anonymous:
+            if args.command == "download" and (re.match(r"^[0-9]+:", args.query) or "://" in args.query):
+                reference = args.query
+                if args.pick is not None or filters != SearchFilters() or args.page != 1 or args.limit != 20:
+                    raise ValueError("Search filters and --pick cannot be used with a direct book reference.")
+        if reference is not None:
+            BookReference.parse(reference, args.domain)
+        if args.command in ("search", "info", "formats") and args.anonymous:
             with Client(args.domain or "https://z-lib.by/", timeout=args.timeout) as client:
-                show_search(client, args, filters)
+                if args.command == "search":
+                    show_search(client, args, filters)
+                else:
+                    show_book_command(client, args)
             return 0
         credentials = load_credentials(args.credentials)
         with Client(args.domain or credentials.domain, timeout=args.timeout) as client:
+            if reference is not None:
+                BookReference.parse(reference, client.domain)
             email = credentials.email or prompt("Email: ")
             password = credentials.password or getpass.getpass("Password: ", stream=sys.stderr)
             del credentials
@@ -157,17 +205,24 @@ def main(argv: list[str] | None = None) -> int:
             if args.command == "search":
                 show_search(client, args, filters)
                 return 0
-            books = client.search(args.query, filters=filters, page=args.page, limit=args.limit)
-            if not books:
-                raise ValueError("No supported books found for this query.")
-            if args.pick is None:
-                show_books(books, file=sys.stderr)
-                index = int(prompt("Result number: "))
+            if args.command in ("info", "formats"):
+                show_book_command(client, args)
+                return 0
+            if reference is not None:
+                selected = reference
             else:
-                index = args.pick
-            if not 1 <= index <= len(books):
-                raise ValueError("Choose a number from the returned results.")
-            path = client.download(books[index - 1], args.output)
+                books = client.search(args.query, filters=filters, page=args.page, limit=args.limit)
+                if not books:
+                    raise ValueError("No supported books found for this query.")
+                if args.pick is None:
+                    show_books(books, file=sys.stderr)
+                    index = int(prompt("Result number: "))
+                else:
+                    index = args.pick
+                if not 1 <= index <= len(books):
+                    raise ValueError("Choose a number from the returned results.")
+                selected = books[index - 1]
+            path = client.download(selected, args.output)
             print(json.dumps({"path": str(path)}, ensure_ascii=False) if args.json else path)
         return 0
     except (ConnectorError, ValueError) as error:

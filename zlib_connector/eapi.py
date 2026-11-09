@@ -4,9 +4,10 @@ import re
 from pathlib import Path
 from urllib.parse import urljoin
 
-from .client import Book, Client as HtmlClient, SUPPORTED_FORMATS, _clean_text, parse_html, same_origin
+from .client import Book, Client as HtmlClient, SUPPORTED_FORMATS, parse_html, same_origin
 from .errors import AuthenticationError, DownloadError, FormatChangedError, RateLimitError
 from .search import SearchFilters, SearchPage, parse_page, validate_search
+from .books import BookDetails, BookFormat, BookReference, parse_book, parse_details, parse_format
 
 
 class Client(HtmlClient):
@@ -61,23 +62,10 @@ class Client(HtmlClient):
         for row in rows:
             if not isinstance(row, dict):
                 raise FormatChangedError("The API returned an invalid book record.")
-            book_id = str(row.get("id", ""))
-            book_hash = str(row.get("hash", ""))
             fmt = str(row.get("extension", "")).lower()
             if fmt not in formats:
                 continue
-            if not book_id.isascii() or not book_id.isdigit() or not re.fullmatch(r"[A-Za-z0-9]+", book_hash):
-                raise FormatChangedError("The API returned an invalid book reference.")
-            title = _clean_text(str(row.get("title", "")))
-            if not title:
-                raise FormatChangedError("The API returned a book without a title.")
-            href = urljoin(self.domain, str(row.get("href") or f"book/{book_id}/{book_hash}"))
-            if not same_origin(href, self.domain):
-                href = urljoin(self.domain, f"book/{book_id}/{book_hash}")
-            books.append(Book(title=title, authors=_clean_text(str(row.get("author") or "")), extension=fmt, url=href,
-                              year=_clean_text(str(row.get("year") or "")), language=_clean_text(str(row.get("language") or "")),
-                              size=_clean_text(str(row.get("filesizeString") or row.get("filesize") or "")),
-                              book_id=book_id, book_hash=book_hash))
+            books.append(parse_book(row, self.domain))
         return parse_page(payload, books[:limit], page, limit)
 
     def iter_search(self, query: str, *, filters: SearchFilters | None = None,
@@ -92,15 +80,33 @@ class Client(HtmlClient):
                 raise FormatChangedError("The API did not advance to the next search page.")
             page = result.next_page
 
-    def download(self, book: Book, destination: str | Path = ".") -> Path:
+    def get_book(self, reference: str) -> BookDetails:
+        reference = BookReference.parse(reference, self.domain)
+        payload = self._json(f"eapi/book/{reference.book_id}/{reference.book_hash}")
+        book = parse_details(payload.get("book"), self.domain)
+        if (book.book_id, book.book_hash) != (reference.book_id, reference.book_hash):
+            raise FormatChangedError("The API returned a different book from the requested reference.")
+        return book
+
+    def get_formats(self, reference: str) -> list[BookFormat]:
+        reference = BookReference.parse(reference, self.domain)
+        payload = self._json(f"eapi/book/{reference.book_id}/{reference.book_hash}/formats")
+        rows = payload.get("books")
+        if not isinstance(rows, list):
+            raise FormatChangedError("The API response has no formats list.")
+        return [parse_format(row) for row in rows]
+
+    def download(self, book: Book | str, destination: str | Path = ".") -> Path:
         self._require_login()
+        folder = Path(destination).resolve(strict=True)
+        if not folder.is_dir():
+            raise ValueError("The download destination must be an existing directory.")
+        if isinstance(book, str):
+            book = self.get_book(book)
         if (not book.book_id.isascii() or not book.book_id.isdigit()
                 or not re.fullmatch(r"[A-Za-z0-9]+", book.book_hash)
                 or book.extension not in SUPPORTED_FORMATS or not same_origin(book.url, self.domain)):
             raise ValueError("Download requires a supported book returned by this API domain.")
-        folder = Path(destination).resolve(strict=True)
-        if not folder.is_dir():
-            raise ValueError("The download destination must be an existing directory.")
         payload = self._json(f"eapi/book/{book.book_id}/{book.book_hash}/file")
         file = payload.get("file")
         if not isinstance(file, dict):
