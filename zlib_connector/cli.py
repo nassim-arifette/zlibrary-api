@@ -42,6 +42,8 @@ def parser() -> argparse.ArgumentParser:
         command.add_argument("reference", help="ID:HASH or a book HTTPS URL on the selected domain")
         command.add_argument("--anonymous", action="store_true", help="do not load or send credentials")
         command.add_argument("--json", action="store_true")
+    for name in ("profile", "quota"):
+        commands.add_parser(name).add_argument("--json", action="store_true")
     commands.add_parser("auth-test", help="test login using local credentials, then discard the session")
     commands.add_parser("shell", help="interactive session: log in once, search and download repeatedly")
     commands.add_parser("check", help="check public HTTPS access without credentials")
@@ -207,6 +209,15 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
             if args.command in ("info", "formats"):
                 show_book_command(client, args)
+                return 0
+            if args.command in ("profile", "quota"):
+                profile = client.get_profile()
+                if args.json:
+                    value = profile.to_dict() if args.command == "profile" else profile.quota.to_dict()
+                    print(json.dumps(value))
+                else:
+                    for name, value in profile.quota.to_dict().items():
+                        print(f"{name.capitalize()}: {value if value is not None else 'unknown'}")
                 return 0
             if reference is not None:
                 selected = reference

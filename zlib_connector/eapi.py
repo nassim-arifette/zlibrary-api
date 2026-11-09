@@ -8,6 +8,7 @@ from .client import Book, Client as HtmlClient, SUPPORTED_FORMATS, parse_html, s
 from .errors import AuthenticationError, DownloadError, FormatChangedError, RateLimitError
 from .search import SearchFilters, SearchPage, parse_page, validate_search
 from .books import BookDetails, BookFormat, BookReference, parse_book, parse_details, parse_format
+from .account import AccountProfile, DownloadQuota, parse_profile
 
 
 class Client(HtmlClient):
@@ -87,6 +88,14 @@ class Client(HtmlClient):
         if (book.book_id, book.book_hash) != (reference.book_id, reference.book_hash):
             raise FormatChangedError("The API returned a different book from the requested reference.")
         return book
+
+    def get_profile(self) -> AccountProfile:
+        """Fetch a fresh public projection; no raw account fields are exposed."""
+        self._require_login()
+        return parse_profile(self._json("eapi/user/profile"))
+
+    def get_quota(self) -> DownloadQuota:
+        return self.get_profile().quota
 
     def get_formats(self, reference: str) -> list[BookFormat]:
         reference = BookReference.parse(reference, self.domain)

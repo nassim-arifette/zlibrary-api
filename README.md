@@ -11,6 +11,7 @@ From this directory:
 python -m zlib_connector check
 python -m zlib_connector auth-test
 python -m zlib_connector shell
+python -m zlib_connector quota --json
 ```
 
 The configured default is `https://z-lib.by/`, verified with a real account on
@@ -152,6 +153,15 @@ selected domain (`/book/ID/HASH[/title]`, without query parameters or a fragment
 search filters and `--pick`, ensuring the selected edition cannot silently change.
 `info` and `formats` use the configured account unless `--anonymous` is provided.
 
+`get_profile()` returns an `AccountProfile` with a safe quota projection;
+`get_quota()` returns a `DownloadQuota` directly. Each call fetches fresh account
+data and requires a logged-in client. The current public profile contains only
+the quota, with no raw account dictionary, email, password or session keys.
+The CLI equivalents are `profile [--json]` and `quota [--json]`.
+Quota fields are `limit`, `used` and `remaining`; remaining is clamped to zero
+when usage exceeds the current limit. Missing counters remain `null` (or `unknown`
+in human-readable output), while malformed counters raise `FormatChangedError`.
+
 Clients are synchronous and not thread-safe; use a separate client per session.
 
 Error types are `AuthenticationError`, `ChallengeRequired`, `RateLimitError`,
@@ -203,3 +213,7 @@ The same day's anonymous check retrieved a matching book-details record and 17
 alternative-format records. Some detail fields were absent and remained empty.
 Direct-reference downloading is covered by synthetic tests through the existing
 validated file-download flow; that check did not consume an account download.
+
+An authorized account-profile check on 2026-11-09 confirmed populated quota
+counters and consistent remaining-download calculation. Verification output
+contained only success flags; no credentials or raw profile fields were recorded.
