@@ -133,6 +133,44 @@ Error types are `AuthenticationError`, `ChallengeRequired`, `RateLimitError`,
 `FormatChangedError`, `NetworkError` and `DownloadError`, all derived from
 `ConnectorError`. Invalid local arguments raise `ValueError`.
 
+## Account collections
+
+Authenticated clients expose these read operations:
+
+| Method | Result |
+| --- | --- |
+| `get_library(limit=5)` | `LibraryOverview` with separate favorites, history and booklists. |
+| `get_favorites(page=1, limit=20, order="saved_date")` | A `BookPage` of saved books. |
+| `get_history(page=1, limit=20, order=None)` | A `BookPage` of account downloads. |
+| `get_booklists()` | The booklists returned for the account, with ID, title, count and visibility when present. |
+| `get_booklist_books(booklist_id, page=1)` | A `BookPage`; the service controls its page size. |
+
+`BookPage` holds the pagination contract shared by search and account collections.
+`SearchPage` remains an alias for compatibility. Favorite orders are `saved_date`,
+`saved_dateA`, `titleA`, `title`, `year`, `filesize` and `filesizeA`. History accepts
+the corresponding `downloaded_date` and `downloaded_dateA` instead of save dates;
+the server may ignore history ordering. The client preserves the returned order.
+
+Collection reads preserve sparse book records and unsupported formats so books do
+not silently disappear. Fetch details before downloading a sparse record, or pass
+its reference to `download()`. Missing collection arrays are protocol errors;
+explicit empty arrays are valid. Counts and visibility stay unknown when absent.
+Raw owner fields and booklist-entry annotations are not exposed.
+
+The CLI commands are `library`, `favorites`, `history`, `booklists [list]` and
+`booklists show BOOKLIST_ID`. All support `--json`. Favorites/history and booklist
+contents return `{books, pagination}`; the booklist index returns an array.
+These operations read account data only. They do not inventory local files,
+change favorites or edit a list. The overview does not assume that a specific
+booklist called "My Library" exists on the account.
+
+Booklists currently use `GET /papi/booklist/current-user/0` and a read-only
+`POST /papi/booklist/{id}/get-books/{page}` with an empty body. Their response
+shapes were checked against the configured account on 2026-11-09. The
+[KOReader implementation](https://github.com/ZlibraryKO/zlibrary.koplugin/blob/main/zlibrary/api.lua)
+provided the endpoint reference. No account content or credentials were recorded
+in verification output.
+
 ## Protocol and safeguards
 
 Login uses the website's `/rpc.php` endpoint, then verifies `/eapi/user/profile`.

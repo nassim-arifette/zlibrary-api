@@ -8,8 +8,9 @@ you want to read, and bring them into the reader or application you use. The goa
 is to make your Z-Library account and collections available through a CLI, a TUI
 and an HTTP API, with the same behavior across them.
 
-**Available today:** a Python library, CLI and interactive shell. My Library,
-booklists, the TUI and the HTTP API are planned. This is an unofficial client.
+**Available today:** a Python library, CLI and interactive shell, including
+browsing favorites, download history and your booklists. Editing collections,
+the TUI and the HTTP API are planned. This is an unofficial client.
 
 ## Get started
 
@@ -90,6 +91,29 @@ zlib-cli --domain https://z-lib.by/ quota
 This shows your daily limit, downloads used and downloads remaining. If a counter
 is missing from the response, it appears as `unknown`. Add `--json` for scripts.
 
+## Browse your library
+
+```sh
+zlib-cli library
+zlib-cli favorites --limit 10
+zlib-cli history --page 2
+zlib-cli booklists
+```
+
+`library` gives you an overview with separate previews of your favorites,
+account download history and booklists. The history comes from Z-Library; it
+doesn't mean those files are still on this computer.
+
+To open one of your booklists, use the ID shown next to its name:
+
+```sh
+zlib-cli booklists show BOOKLIST_ID --page 1
+```
+
+Replace `BOOKLIST_ID` with that number. You can inspect or download any listed
+book using its `ID:HASH` reference. Add `--json` to any of these commands for
+scripts. Reading a list does not modify its books or visibility.
+
 ## Keep a session open
 
 Use the interactive shell to search and download several books after one login:
@@ -147,7 +171,8 @@ account quota and domain diagnostics. See the [reference](docs/reference.md) for
 login examples, return types and errors.
 
 For shell scripts, add `--json` to `search`, `info`, `formats`, `download`,
-`profile`, `quota`, `doctor` or `domains`. Search normally returns an array;
+`profile`, `quota`, `doctor`, `domains`, `library`, `favorites`, `history` or
+`booklists`. Search normally returns an array;
 `--with-pagination` adds a `books` and `pagination` object. Results go to standard
 output, while prompts and errors go to standard error.
 
@@ -169,12 +194,12 @@ For more context on diagnostics and errors, see the [reference](docs/reference.m
 
 The next steps focus on your library and reading lists:
 
-- **My Library and favorites:** browse the books saved on your account and manage
-  them from the client.
-- **Booklists:** open the lists you've created, create and edit lists, and add or
-  remove books where the service supports those operations.
-- **History and discovery:** find previous downloads, similar books, personal
-  recommendations and popular titles.
+- **Favorites:** add and remove saved books, and see their saved status while
+  browsing.
+- **Booklists:** create and edit lists, and add or remove books where the service
+  supports those operations. Browsing existing lists is available now.
+- **History and discovery:** track local files alongside account history and
+  discover similar books, personal recommendations and popular titles.
 - **Reading queues:** import a list, choose editions, skip duplicates and follow
   downloads with progress, cancellation and resume where supported.
 - **Persistent sessions:** reuse a login between commands.

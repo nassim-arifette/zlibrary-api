@@ -2,13 +2,15 @@
 import json
 import re
 from pathlib import Path
-from urllib.parse import urljoin
+from urllib.parse import urlencode, urljoin
 
 from .client import Book, Client as HtmlClient, SUPPORTED_FORMATS, parse_html, same_origin
 from .errors import AuthenticationError, DownloadError, FormatChangedError, RateLimitError
 from .search import SearchFilters, SearchPage, parse_page, validate_search
 from .books import BookDetails, BookFormat, BookReference, parse_book, parse_details, parse_format
 from .account import AccountProfile, DownloadQuota, parse_profile
+from .library import FAVORITE_ORDERS, HISTORY_ORDERS, Booklist, LibraryOverview, booklist_id, parse_booklist
+from .pagination import BookPage, validate_page
 
 
 class Client(HtmlClient):
@@ -104,6 +106,59 @@ class Client(HtmlClient):
         if not isinstance(rows, list):
             raise FormatChangedError("The API response has no formats list.")
         return [parse_format(row) for row in rows]
+
+    def _collection_page(self, path: str, *, page: int, limit: int, form=None, wrapped=False) -> BookPage:
+        payload = self._json(path, form=form)
+        rows = payload.get("books")
+        if not isinstance(rows, list):
+            raise FormatChangedError("The API response has no collection books list.")
+        if wrapped:
+            if any(not isinstance(row, dict) or not isinstance(row.get("book"), dict) for row in rows):
+                raise FormatChangedError("The API returned an unavailable or invalid booklist entry.")
+            rows = [row["book"] for row in rows]
+        # Keep sparse and unsupported-format records visible; details can resolve them later.
+        return parse_page(payload, [parse_book(row, self.domain) for row in rows], page, limit)
+
+    def _account_books(self, collection: str, *, page: int, limit: int, order: str | None) -> BookPage:
+        self._require_login()
+        validate_page(page, limit)
+        orders = FAVORITE_ORDERS if collection == "saved" else HISTORY_ORDERS
+        if order is not None and order not in orders:
+            raise ValueError("Unsupported order for this account collection.")
+        params = {"page": page, "limit": limit}
+        if order is not None:
+            params["order"] = order
+        return self._collection_page(f"eapi/user/book/{collection}?{urlencode(params)}", page=page, limit=limit)
+
+    def get_favorites(self, *, page: int = 1, limit: int = 20, order: str | None = "saved_date") -> BookPage:
+        return self._account_books("saved", page=page, limit=limit, order=order)
+
+    def get_history(self, *, page: int = 1, limit: int = 20, order: str | None = None) -> BookPage:
+        """Read account download history; the service may ignore requested ordering."""
+        return self._account_books("downloaded", page=page, limit=limit, order=order)
+
+    def get_booklists(self) -> list[Booklist]:
+        self._require_login()
+        payload = self._json("papi/booklist/current-user/0")
+        rows = payload.get("list")
+        if not isinstance(rows, list):
+            raise FormatChangedError("The API response has no booklists list.")
+        return [parse_booklist(row) for row in rows]
+
+    def get_booklist_books(self, identifier: str | int, *, page: int = 1) -> BookPage:
+        self._require_login()
+        identifier = booklist_id(identifier)
+        validate_page(page, 20)
+        # This is a read operation despite the upstream endpoint requiring POST.
+        return self._collection_page(f"papi/booklist/{identifier}/get-books/{page}",
+                                     page=page, limit=20, form={}, wrapped=True)
+
+    def get_library(self, *, limit: int = 5) -> LibraryOverview:
+        """Show separate account collections; no local-file inventory is implied."""
+        self._require_login()
+        validate_page(1, limit)
+        return LibraryOverview(self.get_favorites(limit=limit), self.get_history(limit=limit),
+                               tuple(self.get_booklists()))
 
     def download(self, book: Book | str, destination: str | Path = ".") -> Path:
         self._require_login()

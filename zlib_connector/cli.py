@@ -14,6 +14,10 @@ from .errors import ConnectorError
 from .search import SEARCH_ORDERS, SearchFilters, validate_search
 from .books import BookReference
 from .diagnostics import KNOWN_DOMAINS, diagnose_domains
+from .library import FAVORITE_ORDERS, HISTORY_ORDERS, booklist_id
+from .pagination import validate_page
+
+LIBRARY_COMMANDS = ("library", "favorites", "history", "booklists")
 
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(prog="zlib-cli", description="Independent Z-Library search/download client. Sessions remain in memory.")
@@ -45,6 +49,25 @@ def parser() -> argparse.ArgumentParser:
         command.add_argument("--json", action="store_true")
     for name in ("profile", "quota"):
         commands.add_parser(name).add_argument("--json", action="store_true")
+    for name, orders in (("favorites", FAVORITE_ORDERS), ("history", HISTORY_ORDERS)):
+        command = commands.add_parser(name, help=f"browse account {name}")
+        command.add_argument("--page", type=int, default=1)
+        command.add_argument("--limit", type=int, default=20)
+        command.add_argument("--order", choices=orders, default="saved_date" if name == "favorites" else None)
+        command.add_argument("--json", action="store_true")
+    library = commands.add_parser("library", help="overview of favorites, download history and booklists")
+    library.add_argument("--limit", type=int, default=5, help="preview size per book collection")
+    library.add_argument("--json", action="store_true")
+    booklists = commands.add_parser("booklists", help="browse the booklists on your account")
+    booklists.add_argument("--json", action="store_true")
+    booklists.set_defaults(booklist_action="list", page=1)
+    actions = booklists.add_subparsers(dest="booklist_action")
+    list_command = actions.add_parser("list", help="list account booklists")
+    list_command.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+    show_command = actions.add_parser("show", help="read a booklist's books")
+    show_command.add_argument("booklist_id")
+    show_command.add_argument("--page", type=int, default=1)
+    show_command.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
     commands.add_parser("auth-test", help="test login using local credentials, then discard the session")
     commands.add_parser("shell", help="interactive session: log in once, search and download repeatedly")
     commands.add_parser("check", help="check public HTTPS access without credentials")
@@ -65,9 +88,10 @@ def prompt(label: str) -> str:
 def show_books(books, *, file=None):
     file = sys.stdout if file is None else file
     if not books:
-        print("No supported books found.", file=file)
+        print("No books found.", file=file)
     for index, book in enumerate(books, 1):
-        print(f"{index:2}. {book.title}\n    {book.authors} · {book.year} · {book.language} · {book.extension.upper()} · {book.size}", file=file)
+        reference = f" · {book.book_id}:{book.book_hash}" if book.book_id and book.book_hash else ""
+        print(f"{index:2}. {book.title}\n    {book.authors} · {book.year} · {book.language} · {book.extension.upper() or '?'} · {book.size}{reference}", file=file)
 
 def search_filters(args) -> SearchFilters:
     validate_search(args.query, args.page, args.limit)
@@ -116,6 +140,49 @@ def show_book_command(client: Client, args):
             for item in formats:
                 support = "" if item.to_dict()["download_supported"] else " (download unsupported)"
                 print(f"{item.book_id}:{item.book_hash} · {item.extension.upper()} · {item.size}{support}")
+
+
+def show_library_command(client: Client, args):
+    def show_page(page):
+        show_books(page.books)
+        total = page.total_items if page.total_items is not None else "unknown"
+        print(f"Page {page.page} · total: {total}")
+
+    def show_lists(lists):
+        if not lists:
+            print("No booklists found.")
+        for item in lists:
+            count = item.book_count if item.book_count is not None else "unknown"
+            visibility = "unknown" if item.is_public is None else "public" if item.is_public else "private"
+            print(f"{item.booklist_id} · {item.title} · {count} books · {visibility}")
+
+    if args.command == "library":
+        overview = client.get_library(limit=args.limit)
+        if args.json:
+            print(json.dumps(overview.to_dict(), ensure_ascii=False))
+        else:
+            for title, page in (("Favorites", overview.favorites), ("Download history", overview.history)):
+                print(title)
+                show_page(page)
+            print("Booklists")
+            show_lists(overview.booklists)
+        return
+    if args.command == "booklists" and args.booklist_action != "show":
+        lists = client.get_booklists()
+        if args.json:
+            print(json.dumps([item.to_dict() for item in lists], ensure_ascii=False))
+        else:
+            show_lists(lists)
+        return
+    if args.command == "booklists":
+        page = client.get_booklist_books(args.booklist_id, page=args.page)
+    else:
+        fetch = client.get_favorites if args.command == "favorites" else client.get_history
+        page = fetch(page=args.page, limit=args.limit, order=args.order)
+    if args.json:
+        print(json.dumps(page.to_dict(), ensure_ascii=False))
+    else:
+        show_page(page)
 
 
 def shell(client: Client):
@@ -188,6 +255,11 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         filters = None
         reference = None
+        if args.command in ("favorites", "history", "library"):
+            validate_page(getattr(args, "page", 1), args.limit)
+        if args.command == "booklists" and args.booklist_action == "show":
+            booklist_id(args.booklist_id)
+            validate_page(args.page, 20)
         if args.command in ("info", "formats"):
             reference = args.reference
         if args.command in ("search", "download"):
@@ -238,6 +310,9 @@ def main(argv: list[str] | None = None) -> int:
                 else:
                     for name, value in profile.quota.to_dict().items():
                         print(f"{name.capitalize()}: {value if value is not None else 'unknown'}")
+                return 0
+            if args.command in LIBRARY_COMMANDS:
+                show_library_command(client, args)
                 return 0
             if reference is not None:
                 selected = reference
