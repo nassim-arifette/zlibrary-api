@@ -10,11 +10,12 @@ from zlib_connector.client import Client, parse_html, validate_book
 from zlib_connector.transport import Response, public_addresses, validate_url
 from zlib_connector.cli import main
 from zlib_connector.credentials import Credentials
+from streaming_fixture import MemoryDownloadTransport
 
 ORIGIN = "https://books.example/"
 CARDS = b'''<div id="searchResultBox"><div class="book-item"><z-bookcard href="/book/12/abc" extension="PDF" year="2026" language="French" filesize="2 MB"><img src="ignored"><div slot="title">A &amp; <b>B</b></div><div slot="author"><a>Author</a></div></z-bookcard></div><z-bookcard href="https://other.example/book/1" extension="pdf"><div slot="title">Foreign</div></z-bookcard><z-bookcard href="/book/3/x" extension="exe"><div slot="title">Unsupported</div></z-bookcard></div>'''
 
-class FakeTransport:
+class FakeTransport(MemoryDownloadTransport):
     def __init__(self):
         self.authenticated = False
         self.calls = []
@@ -124,7 +125,7 @@ class ClientTests(unittest.TestCase):
     def test_write_failure_cleans_partial_file(self):
         self.login()
         self.transport.responses.extend([b'<a class="addDownloadedBook" href="/dl/1">Download</a>', b'%PDF-1.7\n'])
-        with tempfile.TemporaryDirectory() as tmp, patch("zlib_connector.client.os.link", side_effect=OSError):
+        with tempfile.TemporaryDirectory() as tmp, patch("zlib_connector.book_files.os.link", side_effect=OSError):
             with self.assertRaises(DownloadError):
                 self.client.download(Book("Book", "", "pdf", ORIGIN+"book/1/x"), tmp)
             self.assertEqual(list(Path(tmp).iterdir()), [])

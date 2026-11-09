@@ -8,12 +8,13 @@ from unittest.mock import patch
 from zlib_connector import Client, Book, AuthenticationError, DownloadError, FormatChangedError, RateLimitError
 from zlib_connector.cli import main
 from zlib_connector.transport import Response
+from streaming_fixture import MemoryDownloadTransport
 
 ORIGIN = 'https://books.example/'
 BOOK = {'id': 123, 'hash': 'ab12', 'title': 'Example', 'author': 'Author', 'extension': 'pdf',
         'href': ORIGIN+'book/opaque/example.html', 'year': 1900, 'language': 'English', 'filesizeString': '2 KB'}
 
-class QueueTransport:
+class QueueTransport(MemoryDownloadTransport):
     def __init__(self, responses):
         self.responses = list(responses)
         self.calls = []
@@ -29,6 +30,8 @@ class QueueTransport:
         self.json_bodies.append(json_body)
         self.methods.append(method or ("POST" if form is not None or json_body is not None else "GET"))
         value = self.responses.pop(0)
+        if isinstance(value, BaseException):
+            raise value
         if url.endswith('/rpc.php'):
             self.authenticated = True
         if isinstance(value, Response):

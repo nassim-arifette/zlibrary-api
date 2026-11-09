@@ -15,6 +15,8 @@ from .booklists import BooklistSettings, booklist_entry_id, booklist_id, validat
 from .pagination import validate_page
 from .my_library import validate_tags
 from .http_cli import run_server
+from .cli_progress import ProgressDisplay
+from .transfer import TransferCancelled
 from .cli_parser import BOOKLIST_MUTATIONS, CATALOG_COMMANDS, DISCOVERY_COMMANDS, LIBRARY_COMMANDS, parser
 from .cli_views import account_confirmation, booklist_options, run_catalog_command, run_library_command, show_books
 
@@ -33,7 +35,7 @@ def search_filters(args) -> SearchFilters:
                          year_from=args.year_from, year_to=args.year_to, order=args.order)
 
 
-def shell(client: Client):
+def shell(client: Client, *, progress=None):
     books = []
     last_search = None
     result = None
@@ -72,7 +74,9 @@ def shell(client: Client):
                 index = int(args[1])
                 if not 1 <= index <= len(books):
                     raise ValueError("Choose a number from the most recent search.")
-                print(client.download(books[index - 1], args[2] if len(args) == 3 else "."))
+                with ProgressDisplay(progress) as display:
+                    path = client.download(books[index - 1], args[2] if len(args) == 3 else ".", progress=display)
+                print(path)
             else:
                 print('Use: search "query" [filters], next, prev, download NUMBER [DIRECTORY], or quit.', file=sys.stderr)
         except (ConnectorError, ValueError, OSError) as error:
@@ -170,7 +174,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(json.dumps({"authenticated": True}))
                 return 0
             if args.command == "shell":
-                shell(client)
+                shell(client, progress=args.progress)
                 return 0
             if args.command in CATALOG_COMMANDS:
                 run_catalog_command(client, args, filters)
@@ -201,9 +205,14 @@ def main(argv: list[str] | None = None) -> int:
                 if not 1 <= index <= len(books):
                     raise ValueError("Choose a number from the returned results.")
                 selected = books[index - 1]
-            path = client.download(selected, args.output)
+            with ProgressDisplay(args.progress) as display:
+                path = client.download(selected, args.output, progress=display)
             print(json.dumps({"path": str(path)}, ensure_ascii=False) if args.json else path)
         return 0
+    except TransferCancelled:
+        print(json.dumps({"error": "TransferCancelled", "message": "Cancelled."}) if getattr(args, "json", False)
+              else "Cancelled.", file=sys.stderr)
+        return 130
     except (ConnectorError, ValueError) as error:
         if getattr(args, "json", False):
             print(json.dumps({"error": type(error).__name__, "message": str(error)}), file=sys.stderr)

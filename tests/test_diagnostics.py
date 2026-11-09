@@ -98,9 +98,19 @@ class DomainDiagnosticsTests(unittest.TestCase):
 
 class NetworkReasonTests(unittest.TestCase):
     def test_tcp_timeouts_keep_their_reason_and_share_one_deadline(self):
-        with patch("zlib_connector.transport.public_addresses", return_value=["8.8.8.8", "1.1.1.1"]), \
-                patch("zlib_connector.transport.time.monotonic", side_effect=[0, 0, 1, 3]), \
-                patch("socket.create_connection", side_effect=TimeoutError("synthetic-private")) as connect, \
+        now = [0.0]
+
+        def resolve(host):
+            now[0] += 1  # DNS uses part of the same five-second budget.
+            return ["8.8.8.8", "1.1.1.1"]
+
+        def fail_connection(*args):
+            now[0] += 2
+            raise TimeoutError("synthetic-private")
+
+        with patch("zlib_connector.transport.public_addresses", side_effect=resolve), \
+                patch("zlib_connector.transport.time.monotonic", side_effect=lambda: now[0]), \
+                patch("socket.create_connection", side_effect=fail_connection) as connect, \
                 self.assertRaises(NetworkError) as caught:
             Transport(timeout=5).request("https://example.com/")
         self.assertEqual(caught.exception.reason, "timeout")
@@ -108,13 +118,20 @@ class NetworkReasonTests(unittest.TestCase):
         self.assertEqual([call.args[1] for call in connect.call_args_list], [4, 2])
 
     def test_expired_deadline_stops_before_trying_another_address(self):
+        now = [0.0]
+
+        def fail_connection(*args):
+            now[0] += 6  # The first attempt exhausts the whole request deadline.
+            raise TimeoutError
+
         with patch("zlib_connector.transport.public_addresses", return_value=["8.8.8.8", "1.1.1.1"]), \
-                patch("zlib_connector.transport.time.monotonic", side_effect=[0, 0, 1, 6]), \
-                patch("socket.create_connection", side_effect=TimeoutError) as connect, \
+                patch("zlib_connector.transport.time.monotonic", side_effect=lambda: now[0]), \
+                patch("socket.create_connection", side_effect=fail_connection) as connect, \
                 self.assertRaises(NetworkError) as caught:
             Transport(timeout=5).request("https://example.com/")
         self.assertEqual(caught.exception.reason, "timeout")
         connect.assert_called_once()
+        self.assertEqual(connect.call_args.args[:2], (("8.8.8.8", 443), 5))
 
     def test_dns_error_reason_is_available_through_transport(self):
         with patch("socket.getaddrinfo", side_effect=OSError("synthetic-private-details")):

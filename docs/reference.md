@@ -136,6 +136,71 @@ Error types are `AuthenticationError`, `ChallengeRequired`, `RateLimitError`,
 An edit targeting a list absent from the account's editable collection raises
 `BooklistNotFoundError`, a `ValueError` subclass, before any write is attempted.
 
+## Streaming downloads and cancellation
+
+`Client.download(book_or_reference, destination, progress=None, cancel=None)`
+still returns the published `Path`. Progress and cancellation are keyword-only.
+The client opens a temporary file before requesting the download link, streams
+the response in chunks of at most 64 KiB, then validates the file and publishes
+it atomically without overwriting an existing destination. The same file module
+serves the JSON and legacy HTML clients. No local download history is created.
+
+```python
+from zlib_connector import CancellationToken, TransferCancelled
+
+token = CancellationToken()
+
+def report(update):
+    print(update.to_dict())
+    # token.cancel() may also be called by a controlling thread or UI action.
+
+try:
+    path = client.download("ID:HASH", "downloads", progress=report, cancel=token)
+except TransferCancelled:
+    print("Download cancelled")
+```
+
+`TransferProgress` is an immutable snapshot with `bytes_received`, `total_bytes`
+and `elapsed_seconds`. Its derived `bytes_per_second`, `eta_seconds` and
+`fraction` remain `None` when they cannot be calculated. The clock starts at
+the file transfer; metadata lookup is not part of its elapsed time. A missing
+Content-Length is reported as an unknown total. Progress contains no file URL,
+session information or local path. Receiving 100% of the bytes does not imply
+that validation and publication have succeeded; only the returned path does.
+
+Callbacks run synchronously in the downloading thread. A callback exception
+aborts the transfer and removes the temporary file; it is not converted to a
+network error. No callback runs after publication. The built-in CLI renderer
+disables itself if stderr is closed or fails, preserving the download result.
+
+Cancellation is cooperative: the token is checked between requests, received
+chunks and publication steps. Once a socket is connected, a short-lived guard
+interrupts it on cancellation or expiry of the absolute deadline, including
+internal header and chunk-framing reads. DNS and connection setup may still
+have to return or reach their normal timeout first. Keep progress callbacks
+short; the client does not interrupt user callback code. Ctrl+C also unwinds the temporary file and
+closes the connection. The CLI returns 130 for interruption. No operation is
+automatically repeated, because obtaining a link may already consume quota.
+Interrupted partial files are removed; resumable downloads and HTTP download
+jobs remain planned.
+
+`Transport.download_to(url, binary_stream, progress=None, cancel=None)` is the
+lower-level streaming operation and returns the number of received bytes. It
+does not own, validate or publish the destination stream. It shares the HTTPS,
+cookie, redirect and deadline implementation with `request()`. Content-Length
+is checked against the configured limit and received body according to HTTP
+framing. These checks and file signatures do not establish the upstream book's
+content integrity against an independent checksum.
+
+PDF and DjVu validation checks their file signatures. EPUB validation reads its
+directory before constructing a ZIP reader, with an 8 MiB directory and 10,000
+entry limit. Only the `mimetype` marker is decompressed, capped at 100 bytes
+uncompressed and 1 KiB compressed using STORE or DEFLATE. Ordinary ZIP64 local
+headers work when the central sizes are bounded; ZIP64 end records and
+multi-volume archives are currently rejected. Book payloads are never read
+entirely into memory for this validation. Other EPUB resources are not unpacked
+or checked for full semantic correctness.
+
 ## Account collections
 
 Authenticated clients expose these read operations:
@@ -328,7 +393,9 @@ and [observed response models](https://github.com/heartleo/zlib/blob/main/docs/a
 - HTML pages are not parsed as JSON or saved as books. PDF/EPUB/DjVu signatures
   are validated before publication; download permissions and formats are checked.
 - Responses are bounded: 4 MiB for API/HTML, 256 MiB per book, with a request
-  deadline. Download data is buffered in memory.
+  deadline. Client downloads stream to disk with a 64 KiB transfer buffer;
+  metadata responses remain buffered. Direct legacy use of
+  `Transport.request(download=True)` still returns a buffered response.
 - Files are written to a temporary file, then atomically published with a random
   filename suffix without overwriting existing files. The destination must exist
   and support hard links (NTFS does).
