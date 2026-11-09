@@ -215,6 +215,21 @@ class HttpApiTests(unittest.TestCase):
         with running() as (server, _):
             self.assertEqual(403, request(server, "GET", "/v1/health", headers=origin)[0])
 
+    def test_preflight_validates_route_queries_without_account_access(self):
+        origin = "http://localhost:9000"
+        headers = {"Origin": origin, "Access-Control-Request-Method": "GET",
+                   "Access-Control-Request-Headers": "Authorization"}
+        with running(allowed_origins=(origin,)) as (server, client):
+            status, response_headers, payload = request(server, "OPTIONS", "/v1/search?q=test", headers=headers, authenticate=False)
+            self.assertEqual(204, status)
+            self.assertIsNone(payload)
+            self.assertEqual(origin, response_headers["Access-Control-Allow-Origin"])
+            self.assertEqual("GET", response_headers["Access-Control-Allow-Methods"])
+            self.assertEqual(400, request(server, "OPTIONS", "/v1/search?q=test&unknown=value", headers=headers, authenticate=False)[0])
+            self.assertEqual(403, request(server, "OPTIONS", "/v1/search?q=test",
+                                         headers={**headers, "Access-Control-Request-Headers": "Authorization, Last-Event-ID"}, authenticate=False)[0])
+            self.assertEqual([], client.calls)
+
     def test_pagination_and_search_filters(self):
         with running() as (server, client):
             status, _, result = request(server, "GET", "/v1/search?q=hello&page=2&limit=3&language=english&language=french&format=epub&year_from=1900&year_to=2000&order=popular")

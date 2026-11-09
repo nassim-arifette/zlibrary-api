@@ -11,7 +11,7 @@ from .pagination import BookPage
 from .my_library import BookTagUpdate, LibraryTags
 from .transfer import CancellationToken, TransferCancelled, TransferProgress
 from .sessions import SessionConflictError, SessionError, SessionLockTimeoutError, SessionStore
-from .jobs import DownloadManager, DownloadTask, TaskPage
+from .jobs import DownloadManager, DownloadTask, TaskEvent, TaskSubscription, TaskPage
 from .errors import (
     AuthenticationError, BooklistNotFoundError, ChallengeRequired, ConnectorError, DownloadError,
     FormatChangedError, MutationUncertainError, NetworkError, RateLimitError,
@@ -24,7 +24,7 @@ __all__ = [
     "FavoriteUpdate", "LibraryOverview", "LibraryTags", "BookTagUpdate",
     "CancellationToken", "TransferCancelled", "TransferProgress",
     "SessionStore", "SessionError", "SessionConflictError", "SessionLockTimeoutError",
-    "DownloadManager", "DownloadTask", "TaskPage",
+    "DownloadManager", "DownloadTask", "TaskEvent", "TaskSubscription", "TaskPage",
     "DomainDiagnostic", "DomainReport", "diagnose_domains",
     "ConnectorError", "AuthenticationError", "ChallengeRequired", "DownloadError",
     "FormatChangedError", "MutationUncertainError", "NetworkError", "RateLimitError", "BooklistNotFoundError",

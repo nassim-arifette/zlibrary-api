@@ -83,6 +83,7 @@ paths contain the numeric book ID and alphanumeric hash from a search result.
 | `POST /downloads` | Submit `{reference, idempotency_key}`; returns a task and HTTP 202. |
 | `GET /downloads?limit=50&offset=0` | Tasks for the current account and domain, oldest first. |
 | `GET /downloads/{task_id}` | Current state and progress, without waiting for a transfer. |
+| `GET /downloads/{task_id}/events?duration=30` | Live full-state observations as SSE; optional `after` or `Last-Event-ID`. |
 | `POST /downloads/{task_id}/cancel` | Request cancellation; no JSON body. |
 | `POST /downloads/resume` | Requeue tasks waiting for quota; no JSON body. |
 | `GET /downloads/{task_id}/file` | Retrieve a completed file as a binary attachment. |
@@ -105,6 +106,8 @@ They return 503 while disabled, and `/capabilities` reports that configuration.
 The [task guide](download-tasks.md) covers idempotency, quota waits, cancellation,
 restart behavior and file retrieval. Task reads and cancellation remain available
 while the worker holds the upstream client lock.
+The [live observation contract](download-tasks.md#watch-a-task) describes stream
+limits, reconnection, terminal events and bearer-authenticated browser access.
 
 The API currently has no HTTP login/logout, upload routes or full native My
 Library pages. Anonymous mode exposes the same collection routes, but account

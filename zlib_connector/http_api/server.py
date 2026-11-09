@@ -23,6 +23,7 @@ from ..search import SearchFilters
 from ..my_library import validate_tags
 from .contract import ENDPOINTS, RequestError, openapi_document, resolve, validate_fields
 from . import downloads as download_api
+from . import events as event_api
 
 
 MAX_TARGET = 8192
@@ -59,6 +60,17 @@ def _public_result(value):
     if isinstance(value, (list, tuple)):
         return [_public_result(item) for item in value]
     return value.to_dict()
+
+
+def _query_parameters(raw_query):
+    try:
+        pairs = parse_qsl(raw_query, keep_blank_values=True, strict_parsing=True, encoding="utf-8", errors="strict", max_num_fields=128)
+    except (ValueError, UnicodeDecodeError):
+        raise RequestError(400, "invalid_argument", "The query parameters are invalid.") from None
+    query = {}
+    for name, value in pairs:
+        query.setdefault(name, []).append(value)
+    return query
 
 
 def _upstream_error(error, *, mutation):
@@ -152,6 +164,7 @@ class HttpApiServer(ThreadingHTTPServer):
         self.request_timeout = request_timeout
         self._client_lock = threading.Lock()
         self._connections = threading.BoundedSemaphore(max_connections)
+        self._event_slots = threading.BoundedSemaphore(max(1, min(4, max_connections // 2)))
         self._downloads = download_api.DownloadRoutes(client, self._client_lock)
         super().__init__((str(address), port), _Handler)
         actual_port = self.server_address[1]
@@ -375,14 +388,20 @@ class _Handler(BaseHTTPRequestHandler):
         if length > MAX_BODY:
             raise RequestError(413, "request_too_large", "The JSON request body exceeds the permitted size.")
         if command == "OPTIONS":
-            if not origin or length or raw_query:
+            if not origin or length:
                 raise RequestError(403, "preflight_rejected", "An explicit allowed browser origin is required for preflight.")
             requested = headers.get("access-control-request-method", "")
-            resolve(requested, path)
+            requested_route, _ = resolve(requested, path)
+            if raw_query:
+                validate_fields(_query_parameters(raw_query), requested_route.query, query=True)
             requested_headers = [value.strip().lower() for value in headers.get("access-control-request-headers", "").split(",") if value.strip()]
-            if set(requested_headers) - {"authorization", "content-type"}:
+            allowed_headers = {"authorization", "content-type"}
+            if requested_route.events:
+                allowed_headers.add("last-event-id")
+            if set(requested_headers) - allowed_headers:
                 raise RequestError(403, "preflight_rejected", "The requested browser headers are not allowed.")
-            return None, None, None, {"Access-Control-Allow-Methods": requested, "Access-Control-Allow-Headers": "Authorization, Content-Type"}
+            return None, None, None, {"Access-Control-Allow-Methods": requested,
+                                     "Access-Control-Allow-Headers": "Authorization, Content-Type" + (", Last-Event-ID" if requested_route.events else "")}
         authorization = headers.get("authorization", "")
         parts = authorization.split(" ")
         if (len(parts) != 2 or parts[0].lower() != "bearer" or not parts[1].isascii()
@@ -391,13 +410,11 @@ class _Handler(BaseHTTPRequestHandler):
         route, path_values = resolve(command, path)
         if route.binary and ("range" in headers or "if-range" in headers):
             raise RequestError(400, "range_not_supported", "Byte ranges are not supported for task files.")
-        try:
-            pairs = parse_qsl(raw_query, keep_blank_values=True, strict_parsing=True, encoding="utf-8", errors="strict", max_num_fields=128)
-        except (ValueError, UnicodeDecodeError):
-            raise RequestError(400, "invalid_argument", "The query parameters are invalid.") from None
-        query = {}
-        for name, value in pairs:
-            query.setdefault(name, []).append(value)
+        query = _query_parameters(raw_query)
+        if route.events and "last-event-id" in headers:
+            if "after" in query:
+                raise RequestError(400, "invalid_argument", "Supply after or Last-Event-ID, not both.")
+            query["after"] = [headers["last-event-id"]]
         query = validate_fields(query, route.query, query=True)
         body = None
         if route.body is None:
@@ -437,6 +454,8 @@ class _Handler(BaseHTTPRequestHandler):
                 result = self.server.execute(route, path, query, body)
                 if isinstance(result, download_api.FileResponse):
                     self._send_file(result)
+                elif isinstance(result, download_api.EventResponse):
+                    self._send_events(result)
                 else:
                     self._send(route.status, result)
         except RequestError as error:
@@ -499,6 +518,48 @@ class _Handler(BaseHTTPRequestHandler):
                 self.wfile.write(chunk)
                 remaining -= len(chunk)
             self.wfile.flush()
+
+
+    def _send_events(self, response):
+        if not self.server._event_slots.acquire(blocking=False):
+            raise RequestError(503, "event_streams_busy", "All task observation slots are in use.", retryable=True)
+        try:
+            with response.open() as subscription:
+                deadline = monotonic() + response.duration
+                end_at = deadline - event_api.END_RESERVE
+
+                def write(data):
+                    remaining = deadline - monotonic()
+                    if remaining <= 0:
+                        raise TimeoutError
+                    self.connection.settimeout(min(remaining, self.server.request_timeout))
+                    self.wfile.write(data)
+                    self.wfile.flush()
+
+                self._response_started = True
+                write(self._headers(200, {"Content-Type": "text/event-stream; charset=utf-8"}))
+                heartbeat_at = monotonic() + event_api.HEARTBEAT_INTERVAL
+                reason = "duration"
+                while True:
+                    if subscription.closed:
+                        reason = "shutdown"
+                        break
+                    now = monotonic()
+                    if now >= end_at:
+                        break
+                    event = subscription.next(timeout=max(0, min(end_at, heartbeat_at) - now))
+                    if event is not None:
+                        write(event_api.task_frame(event))
+                        heartbeat_at = monotonic() + event_api.HEARTBEAT_INTERVAL
+                        if event.task.state in event_api.TERMINAL_STATES:
+                            reason = "terminal"
+                            break
+                    elif not subscription.closed and monotonic() >= heartbeat_at:
+                        write(b": heartbeat\n\n")
+                        heartbeat_at = monotonic() + event_api.HEARTBEAT_INTERVAL
+                write(event_api.end_frame(reason))
+        finally:
+            self.server._event_slots.release()
 
 
 def _unique_object(pairs):

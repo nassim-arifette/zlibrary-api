@@ -3,6 +3,7 @@ from contextlib import contextmanager
 import http.client
 import ipaddress
 import json
+import math
 from pathlib import Path
 import re
 import time
@@ -11,8 +12,10 @@ from urllib.parse import urlencode, urlsplit
 from .api_token import read_api_token
 from .book_files import save_book
 from .errors import ConnectorError, NetworkError
-from .jobs.models import validate_task_id as task_id
+from .jobs.events import validate_event_id
+from .jobs.models import TERMINAL_STATES, validate_task_id as task_id
 from .network_deadline import ReadDeadline
+from .sse import SSEDecoder, event_json, invalid_stream, validate_public_event
 from .transport import BOOK_LIMIT, CHUNK_SIZE
 
 
@@ -67,7 +70,7 @@ class LocalAPI:
         self._token = read_api_token(token_file)
 
     @contextmanager
-    def _response(self, method, path, *, body=None, query=None):
+    def _response(self, method, path, *, body=None, query=None, stream_duration=None, stop_at=None):
         if method not in ("GET", "POST") or re.fullmatch(r"/downloads(?:/[a-z0-9]+(?:/[a-z]+)?)?", path) is None:
             raise ValueError("Unsupported local task operation.")
         target = "/v1" + path
@@ -77,16 +80,26 @@ class LocalAPI:
         if data is not None and len(data) > 65536:
             raise ValueError("The local API request exceeds its size limit.")
         headers = {"Authorization": "Bearer " + self._token, "Connection": "close", "Accept-Encoding": "identity"}
+        if stream_duration is not None:
+            headers["Accept"] = "text/event-stream"
         if data is not None:
             headers["Content-Type"] = "application/json"
-        connection = http.client.HTTPConnection(self._host, self._port, timeout=self._timeout)
-        deadline = time.monotonic() + self._timeout
+        deadline = time.monotonic() + self._timeout + (stream_duration or 0)
+        if stop_at is not None:
+            deadline = min(deadline, stop_at)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            self._network_error(deadline)
+        connection = http.client.HTTPConnection(self._host, self._port, timeout=min(self._timeout, remaining))
         guard = None
         response = None
         try:
             try:
                 connection.connect()
-                guard = ReadDeadline(connection.sock, deadline, None)
+                # getresponse() can detach a close-delimited socket from the
+                # connection; retain it while the response owns the stream.
+                connected_socket = connection.sock
+                guard = ReadDeadline(connected_socket, deadline, None)
                 guard.start()
                 connection.request(method, target, body=data, headers=headers)
                 response = connection.getresponse()
@@ -94,18 +107,101 @@ class LocalAPI:
                 self._network_error(deadline)
             if not 200 <= response.status < 300:
                 raise LocalAPIError(response.status)
-            lengths = response.headers.get_all("Content-Length", [])
-            if (len(lengths) != 1 or re.fullmatch(r"[0-9]{1,12}", lengths[0]) is None
-                    or response.headers.get("Transfer-Encoding") is not None
-                    or response.headers.get("Content-Encoding", "identity").lower() != "identity"):
-                raise NetworkError("The local API returned unsupported response framing.")
-            yield response, int(lengths[0]), deadline
+            if stream_duration is not None:
+                self._event_framing(response)
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    self._network_error(deadline)
+                if connected_socket is not None:
+                    # Valid SSE may be silent until its heartbeat or duration
+                    # end. Headers use the ordinary timeout; stream reads use
+                    # their absolute budget, still enforced by the guard.
+                    try:
+                        connected_socket.settimeout(remaining)
+                    except OSError:
+                        self._network_error(deadline)
+                yield response, None, deadline
+            else:
+                lengths = response.headers.get_all("Content-Length", [])
+                if (len(lengths) != 1 or re.fullmatch(r"[0-9]{1,12}", lengths[0]) is None
+                        or response.headers.get("Transfer-Encoding") is not None
+                        or response.headers.get("Content-Encoding", "identity").lower() != "identity"):
+                    raise NetworkError("The local API returned unsupported response framing.")
+                yield response, int(lengths[0]), deadline
         finally:
             if guard is not None:
                 guard.close()
             if response is not None:
                 response.close()
             connection.close()
+
+    @staticmethod
+    def _event_framing(response):
+        headers = response.headers
+        content_types = headers.get_all("Content-Type", [])
+        encodings = headers.get_all("Content-Encoding", [])
+        connections = headers.get_all("Connection", [])
+        if (response.status != 200 or headers.get("Content-Length") is not None
+                or headers.get("Transfer-Encoding") is not None
+                or len(content_types) != 1
+                or re.fullmatch(r'text/event-stream\s*;\s*charset=(?:utf-8|"utf-8")', content_types[0], re.I) is None
+                or (encodings and (len(encodings) != 1 or encodings[0].lower() != "identity"))
+                or len(connections) != 1 or connections[0].lower() != "close"):
+            raise NetworkError("The local API returned unsupported event stream framing.")
+
+    def events(self, identifier, *, after=None, duration=30):
+        """Observe one bounded stream. Closing the iterator releases its socket.
+
+        A normal end means an explicit duration end or a terminal observation.
+        Unexpected EOF and an unfinished server shutdown raise NetworkError.
+        """
+        yield from self._events(identifier, after=after, duration=duration)
+
+    def _events(self, identifier, *, after=None, duration=30, stop_at=None):
+        identifier = task_id(identifier)
+        if after is not None:
+            validate_event_id(after)
+        if type(duration) not in (int, float) or not 1 <= duration <= 60 or not math.isfinite(duration):
+            raise ValueError("Choose an event stream duration between 1 and 60 seconds.")
+        # Query numbers have a bounded decimal grammar. Monotonic-clock
+        # subtraction can produce a longer float representation; keep the
+        # original value for deadlines and bound only its wire encoding.
+        query = {"duration": format(duration, ".9f").rstrip("0").rstrip(".")}
+        if after is not None:
+            query["after"] = after
+        decoder = SSEDecoder()
+        with self._response("GET", f"/downloads/{identifier}/events", query=query,
+                            stream_duration=duration, stop_at=stop_at) as (response, _, deadline):
+            while True:
+                if time.monotonic() >= deadline:
+                    self._network_error(deadline)
+                try:
+                    chunk = response.read1(16 * 1024)
+                except (OSError, http.client.HTTPException):
+                    self._network_error(deadline)
+                if not chunk:
+                    if time.monotonic() >= deadline:
+                        self._network_error(deadline)
+                    raise NetworkError("The local API event stream ended unexpectedly.")
+                for name, cursor, data in decoder.feed(chunk):
+                    value = event_json(data)
+                    if name == "end":
+                        if cursor is not None or set(value) != {"reason"}:
+                            invalid_stream()
+                        if value["reason"] == "duration":
+                            return
+                        if value["reason"] == "shutdown":
+                            raise NetworkError("The local API stopped while the observed task was unfinished.")
+                        # A terminal observation completes the stream immediately;
+                        # a terminal end without that observation is inconsistent.
+                        invalid_stream()
+                    if name != "task":
+                        invalid_stream()
+                    value = validate_public_event(value, identifier=identifier, cursor=cursor)
+                    terminal = value["task"]["state"] in TERMINAL_STATES
+                    yield value
+                    if terminal:
+                        return
 
     @staticmethod
     def _network_error(deadline):

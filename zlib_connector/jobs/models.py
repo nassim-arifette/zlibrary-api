@@ -29,6 +29,11 @@ _ERROR_MESSAGES = {
 }
 
 
+def task_error_message(code: str | None) -> str | None:
+    """Return the fixed public message for a task error code."""
+    return _ERROR_MESSAGES.get(code)
+
+
 class JobError(ConnectorError):
     pass
 
@@ -140,7 +145,7 @@ class DownloadTask:
                 "created_at": self.created_at, "updated_at": self.updated_at,
                 "progress": self.progress.to_dict() if self.progress is not None else None,
                 "cancel_requested": self.cancel_requested, "error_code": self.error_code,
-                "file_available": self.state == "succeeded", "error_message": _ERROR_MESSAGES.get(self.error_code),
+                "file_available": self.state == "succeeded", "error_message": task_error_message(self.error_code),
                 "outcome": outcome}
 
 

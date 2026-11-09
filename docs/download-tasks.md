@@ -92,6 +92,60 @@ A crash between file publication and recording success can leave a file on disk
 without a confirmed task result. The server retains that file and does not
 silently request another download. Storage errors stop further dispatch.
 
+## Watch a task
+
+```sh
+zlib-cli jobs watch TASK_ID --duration 300
+zlib-cli jobs watch TASK_ID --duration 300 --json
+```
+
+Watching does not start, cancel or retry a download. It stops when the task is
+terminal, the requested duration expires, or you press Ctrl+C. The default is
+60 seconds; `--duration` accepts 1 to 3600 seconds. JSON output is one complete
+`TaskEvent` object per line, with `id`, `task` and `paused`. Ordinary output shows
+the current state and available progress.
+
+The HTTP route is `GET /v1/downloads/{task_id}/events?duration=30`. It requires
+the same bearer token, Host and Origin checks as the other routes. A stream lasts
+1 to 60 seconds and uses UTF-8 `text/event-stream`. Each `task` event carries a
+complete public task object and the queue's pause flag:
+
+```text
+event: task
+id: 0123456789abcdef0123456789abcdef:7
+data: {"id":"0123456789abcdef0123456789abcdef:7","task":{...},"paused":false}
+
+```
+
+The cursor is an opaque process epoch and revision, not a credential. Supply the
+last cursor in `Last-Event-ID` or the `after` query parameter, never both. An exact
+match suppresses duplicate nonterminal state. An older cursor or a server restart
+returns the latest full state. Terminal tasks are always reported once, even when
+the cursor matches. You can also read `GET /v1/downloads/{task_id}` after any
+interruption.
+
+Updates can be coalesced when a consumer is slow. This feed reports current state;
+it does not replay every transition or preserve an event history. An idle stream
+sends a comment heartbeat at least every five seconds. Each frame is bounded to
+64 KiB. A final `end` event names its reason: `terminal`, `duration` or `shutdown`.
+An unexpected disconnect is an error and does not imply that the task finished.
+
+The CLI reconnects after a normal duration boundary, passing its latest cursor,
+until its total observation time expires. It does not retry network, protocol or
+storage failures. Stopping the server while a watched task remains unfinished is
+reported as an interrupted observation.
+
+At most four HTTP streams are active at once, also limited to half the configured
+connection slots (with one stream allowed when only one slot is configured).
+Excess streams receive 503. A slow reader cannot hold the worker lock or prevent
+another client from cancelling a task. Subscriptions are released on disconnect,
+timeout or shutdown.
+
+For a browser, use a streaming `fetch()` request with an Authorization header and
+an explicitly allowed origin. Native `EventSource` cannot set that header; bearer
+tokens are never accepted in a URL. Frame syntax follows the
+[HTML server-sent events standard](https://html.spec.whatwg.org/multipage/server-sent-events.html).
+
 ## Retrieve a completed book
 
 `GET /v1/downloads/{task_id}/file` returns the validated PDF, EPUB or DjVu as an
@@ -131,6 +185,23 @@ immutable `DownloadTask` records. `open_file(id)` is a context manager yielding
 exported from `zlib_connector.jobs`. If other code shares the synchronous Client,
 pass one `threading.Lock` as `client_lock` and use it for every other Client call.
 
+Python consumers can subscribe to the same observations without starting HTTP:
+
+```python
+with downloads.watch(task.id) as observations:
+    while not observations.closed:
+        event = observations.next(timeout=5)
+        if event is not None:
+            print(event.to_dict())
+```
+
+`watch(task_id, after=None)` returns a context-managed subscription. `next()`
+returns an immutable `TaskEvent` or `None` when its wait expires. Close a
+subscription when leaving the view; closing it never cancels the task. A manager
+permits up to 32 subscriptions and wakes them on shutdown. Observation reads do
+not contact Z-Library or write the task journal. These are the shared Python
+observations available for future TUI views.
+
 ## Storage and current limits
 
 Private metadata lives under `.zlib-jobs/<account-scope>/tasks.json` in the root.
@@ -144,5 +215,5 @@ during a transfer.
 The registry defaults to 1000 tasks per account and permits 1 to 10000, with a
 32 MiB journal limit. It rejects new requests when full while keeping existing
 idempotency keys usable. There is no automatic eviction, deletion command, retry,
-SSE stream, byte-range resume or import from booklists yet. Completed files are
+whole-queue event feed, byte-range resume or import from booklists yet. Completed files are
 not removed by cancellation or server shutdown.

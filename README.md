@@ -332,6 +332,7 @@ In another terminal, submit a book reference and keep its returned task ID:
 zlib-cli jobs add "ID:HASH" --key my-first-download --json
 zlib-cli jobs list
 zlib-cli jobs show TASK_ID --json
+zlib-cli jobs watch TASK_ID
 zlib-cli jobs cancel TASK_ID
 zlib-cli jobs file TASK_ID --output .
 ```
@@ -339,6 +340,10 @@ zlib-cli jobs file TASK_ID --output .
 Replace `ID:HASH` and `TASK_ID` with your book reference and task ID. `jobs file`
 copies a completed download to your chosen folder without downloading it from
 Z-Library again. All `jobs` commands support `--json`.
+
+`jobs watch` follows one task for up to 60 seconds, or until it finishes. Use
+`--duration 300` to watch longer. With `--json`, each line is a complete state
+update. Ctrl+C stops watching; use `jobs cancel` to cancel the download itself.
 
 The server downloads one book at a time. It saves tasks before starting them,
 reports progress and pauses when the account quota is exhausted. After the quota
@@ -405,8 +410,8 @@ The next steps focus on your library and reading lists:
   downloads with progress, cancellation and resume where supported.
 - **TUI:** browse and manage collections from an interactive terminal, using the
   same core as the API and CLI.
-- **Download events:** stream progress updates to API clients and the TUI;
-  task polling and file retrieval are available.
+- **Queue views:** bring live task updates into the TUI and add a feed for the
+  whole queue. Per-task SSE updates, polling and file retrieval are available.
 - **Uploads:** send a book with its metadata and track its processing, once the
   service's upload flow and destination visibility have been verified.
 
@@ -424,6 +429,9 @@ python -m unittest discover -s tests -q
 GitHub Actions runs the offline tests on Windows and Linux with Python 3.11 and
 3.14. It also installs the package and checks the installed CLI outside the source
 folder. These checks do not use a Z-Library account or contact its servers.
+CI runs for code, tests, packaging or workflow changes in pull requests; newer
+pushes cancel obsolete runs. Merging the tested branch does not rerun the suite
+on `main`. Documentation-only changes skip CI; a manual run remains available.
 
 The [technical reference](docs/reference.md) covers protocol behavior, file
 validation and recorded compatibility checks. Z-Library's endpoints and domains
