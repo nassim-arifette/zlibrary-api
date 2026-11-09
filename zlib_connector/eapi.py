@@ -10,16 +10,19 @@ from .errors import AuthenticationError, ChallengeRequired, DownloadError, Forma
 from .search import SearchFilters, SearchPage, parse_page, validate_search
 from .books import BookDetails, BookFormat, BookReference, parse_books, parse_details, parse_format
 from .account import AccountProfile, DownloadQuota, parse_profile
-from .library import (
-    FAVORITE_ORDERS, HISTORY_ORDERS, Booklist, BooklistBookUpdate, FavoriteUpdate,
-    LibraryOverview, booklist_entry_id, booklist_id, parse_booklist, parse_booklist_books,
+from .library import FAVORITE_ORDERS, HISTORY_ORDERS, FavoriteUpdate, LibraryOverview
+from .booklists import (
+    Booklist, BooklistBookUpdate, BooklistDeletion, BooklistSettings,
+    booklist_entry_id, booklist_id, parse_booklist, parse_booklist_books, validate_booklist_changes,
 )
 from .pagination import BookPage, validate_page
 
 
 class Client(HtmlClient):
-    def _json(self, path: str, *, form=None, mutation=False) -> dict:
+    def _json(self, path: str, *, form=None, json_body=None, mutation=False) -> dict:
         options = {"follow_redirects": False} if mutation else {}
+        if json_body is not None:
+            options["json_body"] = json_body
         try:
             response = self._transport.request(urljoin(self.domain, path), form=form, **options)
             if not same_origin(response.url, self.domain):
@@ -145,12 +148,55 @@ class Client(HtmlClient):
         return self._account_books("downloaded", page=page, limit=limit, order=order)
 
     def get_booklists(self) -> list[Booklist]:
+        return [parse_booklist(row) for row in self._booklist_records()]
+
+    def _booklist_records(self) -> list[dict]:
         self._require_login()
-        payload = self._json("papi/booklist/current-user/0")
-        rows = payload.get("list")
-        if not isinstance(rows, list):
-            raise FormatChangedError("The API response has no booklists list.")
-        return [parse_booklist(row) for row in rows]
+        rows = self._json("papi/booklist/current-user/0").get("list")
+        if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+            raise FormatChangedError("The API response has no valid booklists list.")
+        return rows
+
+    def _write_booklist(self, path: str, settings: BooklistSettings, identifier: str | None = None) -> Booklist:
+        payload = self._json(path, json_body=settings.to_payload(), mutation=True)
+        try:
+            row = payload.get("readlist")
+            result = parse_booklist(row)
+            # Display defaults must never substitute for missing mutation acknowledgments.
+            BooklistSettings.from_record(row, {})
+            if ((identifier is not None and result.booklist_id != identifier) or not settings.matches(result)):
+                raise FormatChangedError("The updated booklist could not be confirmed.")
+            return result
+        except FormatChangedError:
+            raise MutationUncertainError(
+                "The booklist update could not be confirmed. Read your lists and visibility before trying again."
+            ) from None
+
+    def create_booklist(self, title: str, *, description: str = "", is_public: bool = False, color: int = 0) -> Booklist:
+        """Create a private list by default. Publishing requires is_public=True."""
+        self._require_login()
+        settings = BooklistSettings(title, description, is_public, color)
+        return self._write_booklist("papi/booklist/create", settings)
+
+    def update_booklist(self, identifier: str | int, *, title: str | None = None,
+                        description: str | None = None, is_public: bool | None = None,
+                        color: int | None = None) -> Booklist:
+        """Read current settings, then replace only requested fields in the site's full form."""
+        self._require_login()
+        identifier = booklist_id(identifier)
+        changes = validate_booklist_changes(title=title, description=description, is_public=is_public, color=color)
+        for row in self._booklist_records():
+            if parse_booklist(row).booklist_id == identifier:
+                settings = BooklistSettings.from_record(row, changes)
+                return self._write_booklist(f"papi/booklist/{identifier}/edit", settings, identifier)
+        raise ValueError("This booklist was not found in the account's editable lists.")
+
+    def delete_booklist(self, identifier: str | int) -> BooklistDeletion:
+        """Delete a remote list permanently; downloaded files are unaffected."""
+        self._require_login()
+        identifier = booklist_id(identifier)
+        self._json(f"papi/booklist/{identifier}/delete", mutation=True)
+        return BooklistDeletion(identifier)
 
     def get_booklist_books(self, identifier: str | int, *, page: int = 1) -> BookPage:
         self._require_login()

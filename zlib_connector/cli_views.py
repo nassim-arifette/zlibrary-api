@@ -4,6 +4,32 @@ import sys
 
 from .eapi import Client
 from .search import SearchFilters
+from .books import BookReference
+from .booklists import validate_booklist_changes
+
+
+def booklist_options(args) -> dict:
+    return {name: getattr(args, name) for name in ("title", "description", "is_public", "color")}
+
+
+def account_confirmation(args, domain: str) -> str:
+    if args.command == "favorites":
+        action = "Add to" if args.favorite_action == "add" else "Remove from"
+        identifier = BookReference.parse(args.reference, domain).book_id
+        return f"{action} favorites on {domain}: book {identifier}? [y/N] "
+    action = args.booklist_action
+    if action == "add":
+        identifier = BookReference.parse(args.reference, domain).book_id
+        return f"Add book {identifier} to booklist {args.booklist_id} on {domain}? [y/N] "
+    if action == "remove":
+        return f"Remove entry {args.entry_id} from booklist {args.booklist_id} on {domain}? [y/N] "
+    if action == "delete":
+        return f"Permanently delete booklist {args.booklist_id} on {domain}? [y/N] "
+    settings = booklist_options(args)
+    if action == "edit":
+        settings = validate_booklist_changes(**settings)
+    target = "a booklist" if action == "create" else f"booklist {args.booklist_id}"
+    return f"{action.capitalize()} {target} on {domain}: {json.dumps(settings, ensure_ascii=False)}? [y/N] "
 
 
 def show_books(books, *, file=None):
@@ -116,6 +142,22 @@ def run_library_command(client: Client, args):
             result = client.remove_booklist_book(args.booklist_id, args.entry_id)
             message = f"Removed entry {result.entry_id} from booklist {result.booklist_id}."
         print(json.dumps(result.to_dict()) if args.json else message)
+        return
+
+    if args.command == "booklists" and args.booklist_action in ("create", "edit", "delete"):
+        action = args.booklist_action
+        if action == "create":
+            result = client.create_booklist(**booklist_options(args))
+        elif action == "edit":
+            result = client.update_booklist(args.booklist_id, **booklist_options(args))
+        else:
+            result = client.delete_booklist(args.booklist_id)
+        if args.json:
+            print(json.dumps(result.to_dict(), ensure_ascii=False))
+        elif action == "delete":
+            print(f"Deleted booklist {result.booklist_id}.")
+        else:
+            show_lists([result])
         return
 
     if args.command == "library":

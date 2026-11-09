@@ -206,8 +206,48 @@ The site's [bookmark script](https://z-lib.by/resources/js/user-bookmarks.js),
 read on 2026-11-09, uses `GET /papi/booklist/{id}/add-book/{book_id}` and
 `GET /papi/booklist/{id}/remove-book/{entry_id}`. Account reads confirmed the
 entry schema; mutation behavior is covered by synthetic tests. No real booklist
-was modified to validate these commands. Creating, editing and deleting the
-lists themselves remain separate planned operations.
+was modified to validate these commands.
+
+### Booklist settings
+
+| Python method | CLI command |
+| --- | --- |
+| `create_booklist(title, description="", is_public=False, color=0)` | `booklists create TITLE [--description TEXT] [--public] [--color 0..5]` |
+| `update_booklist(id, title=None, description=None, is_public=None, color=None)` | `booklists edit ID [--title TEXT] [--description TEXT] [--public / --private] [--color 0..5]` |
+| `delete_booklist(id)` | `booklists delete ID` |
+
+Settings are keyword-only after the title or ID. New lists are private unless
+explicitly made public. The client validates a nonblank title of at most 120
+characters, a description of at most 1000 characters, a boolean visibility and
+an integer color from 0 to 5. Control characters are rejected except newlines
+and tabs in descriptions. An empty description clears it; `None` preserves it.
+
+Editing fetches the current account list and sends the site's full settings form,
+preserving the exact description text and other unmodified values. Missing
+settings prevent an update; a list absent from the account's editable collection
+cannot be edited. The upstream protocol has no verified conditional-write
+mechanism, so concurrent edits to the same list can overwrite each other.
+
+Creation and editing return a `Booklist`, now including the optional `color`.
+The response must confirm the expected settings (and the same ID for an edit);
+an incomplete or conflicting result raises `MutationUncertainError`. Deletion
+returns `BooklistDeletion`, serialized as `{booklist_id, deleted: true}` after
+the service confirms success. All three CLI commands require confirmation or
+`--yes`, and support `--json`. Deleting a list does not delete downloaded files.
+
+The site's current [booklist component](https://z-lib.by/components/z-booklist.js),
+[list browser](https://z-lib.by/components/z-booklists-browser.js) and
+[request helper](https://z-lib.by/resources/build/main.js), inspected on
+2026-11-09, establish `POST /papi/booklist/create`,
+`POST /papi/booklist/{id}/edit` and `GET /papi/booklist/{id}/delete`.
+The first two send a JSON body using the browser helper's
+`text/plain;charset=UTF-8` content type. A private list includes `private: "on"`;
+a public list omits that checkbox field. The client uses explicit settings
+instead of the site's visibility-toggle endpoint.
+
+The existing account settings were checked read-only. Creation, editing,
+deletion, refusals and uncertain results are covered by synthetic tests;
+no real lists were created, changed, published or deleted during verification.
 
 Book records now include `is_favorite`: true/false when the service supplies a
 recognized saved flag, otherwise null. Books read from the favorites collection

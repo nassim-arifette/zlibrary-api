@@ -9,6 +9,7 @@ from .search import SEARCH_ORDERS
 LIBRARY_COMMANDS = ("library", "favorites", "history", "booklists")
 DISCOVERY_COMMANDS = ("similar", "popular", "recommended")
 CATALOG_COMMANDS = ("search", "info", "formats", *DISCOVERY_COMMANDS)
+BOOKLIST_MUTATIONS = ("add", "remove", "create", "edit", "delete")
 
 
 def parser() -> argparse.ArgumentParser:
@@ -82,6 +83,24 @@ def parser() -> argparse.ArgumentParser:
             change.add_argument("reference", help="ID:HASH or a book URL on the selected domain")
         else:
             change.add_argument("entry_id", help="entry ID from booklists show, distinct from the book ID")
+        change.add_argument("--yes", action="store_true", help="apply the account change without prompting")
+        change.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+    for action in ("create", "edit", "delete"):
+        change = actions.add_parser(action, help=f"{action} a remote booklist")
+        if action == "create":
+            change.add_argument("title")
+        else:
+            change.add_argument("booklist_id")
+        if action != "delete":
+            if action == "edit":
+                change.add_argument("--title", help="new name; other settings are preserved")
+            change.add_argument("--description", default="" if action == "create" else None,
+                                help="description, up to 1000 characters; use an empty string to clear it")
+            change.add_argument("--color", type=int, choices=range(6), default=0 if action == "create" else None)
+            visibility = change.add_mutually_exclusive_group()
+            visibility.add_argument("--public", dest="is_public", action="store_true", help="make the list public")
+            visibility.add_argument("--private", dest="is_public", action="store_false", help="make the list private (default for new lists)")
+            change.set_defaults(is_public=False if action == "create" else None)
         change.add_argument("--yes", action="store_true", help="apply the account change without prompting")
         change.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
     commands.add_parser("auth-test", help="test login using local credentials, then discard the session")
