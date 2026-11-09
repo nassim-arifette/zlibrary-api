@@ -11,6 +11,7 @@ from .http_api import create_server
 from .http_api.server import _allowed_origin
 from .api_token import load_api_token
 from .local_state import state_directory
+from .cli_session import AccountSession
 
 
 def add_serve_parser(commands):
@@ -67,20 +68,11 @@ def run_server(args, *, client_factory=Client, credentials_loader=load_credentia
     _validate_listener(args)
     token_path = (args.token_file or state_directory() / "api-token").expanduser().absolute()
     token = load_api_token(token_path)
-    credentials = None if args.anonymous else credentials_loader(args.credentials)
-    domain = args.domain or (credentials.domain if credentials is not None else "https://z-lib.by/")
-    with client_factory(domain, timeout=args.timeout) as client:
+    account = AccountSession(args, credentials_loader=credentials_loader)
+    with client_factory(account.domain, timeout=args.timeout) as client:
         with server_factory(client, token=token, host=args.host, port=args.port,
                             allowed_origins=args.allow_origin) as server:
-            if credentials is not None:
-                email, password = credentials.email, credentials.password
-                del credentials
-                try:
-                    email = email or prompt("Email: ")
-                    password = password or password_prompt("Password: ")
-                    client.login(email, password)
-                finally:
-                    email = password = ""
+            account.authenticate(client, prompt=prompt, password_prompt=password_prompt)
             address, port = server.server_address[:2]
             print(f"HTTP API: http://{address}:{port}/v1", file=sys.stderr, flush=True)
             print(f"Bearer token file: {token_path}", file=sys.stderr, flush=True)

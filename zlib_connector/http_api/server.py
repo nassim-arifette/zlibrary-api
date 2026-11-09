@@ -30,6 +30,29 @@ MAX_BODY = 65536
 _HEADER_NAME = re.compile(rb"[!#$%&'*+.^_`|~0-9A-Za-z-]+")
 
 
+def _finish_response(connection):
+    """Half-close output, then discard bounded late input before a full close.
+
+    Closing with an arriving, unread request body can reset TCP and erase the
+    error response on Windows. Discard bytes only: never parse another request.
+    """
+    try:
+        connection.shutdown(socket.SHUT_WR)
+        remaining = MAX_TARGET + MAX_HEADERS + MAX_BODY
+        deadline = monotonic() + 0.1
+        while remaining > 0:
+            wait = deadline - monotonic()
+            if wait <= 0:
+                break
+            connection.settimeout(wait)
+            chunk = connection.recv(min(4096, remaining))
+            if not chunk:
+                break
+            remaining -= len(chunk)
+    except OSError:
+        pass
+
+
 def _public_result(value):
     if isinstance(value, (list, tuple)):
         return [_public_result(item) for item in value]
@@ -137,20 +160,10 @@ class HttpApiServer(ThreadingHTTPServer):
                 request.settimeout(0.1)
                 data = json.dumps(RequestError(503, "server_busy", "The local API is busy.", retryable=True).to_dict()).encode()
                 request.sendall(b"HTTP/1.1 503 Service Unavailable\r\nContent-Type: application/json\r\nCache-Control: no-store\r\nConnection: close\r\nContent-Length: " + str(len(data)).encode() + b"\r\n\r\n" + data)
-                # Let the peer read the refusal before closing a socket with
-                # unread input (which otherwise resets the connection on Windows).
-                request.shutdown(socket.SHUT_WR)
-                remaining = MAX_TARGET + MAX_HEADERS + MAX_BODY
-                deadline = monotonic() + 0.1
-                while remaining > 0 and monotonic() < deadline:
-                    request.settimeout(max(0.001, deadline - monotonic()))
-                    chunk = request.recv(min(4096, remaining))
-                    if not chunk:
-                        break
-                    remaining -= len(chunk)
             except OSError:
                 pass
             finally:
+                _finish_response(request)
                 self.shutdown_request(request)
             return
         try:
@@ -400,6 +413,8 @@ class _Handler(BaseHTTPRequestHandler):
         except Exception as error:
             failure = _upstream_error(error, mutation=route is not None and route.mutation)
             self._send(failure.status, failure.to_dict())
+        finally:
+            _finish_response(self.connection)
 
     def _send(self, status, payload, headers=None):
         data = b"" if payload is None else json.dumps(payload, ensure_ascii=True, allow_nan=False, separators=(",", ":")).encode("utf-8")

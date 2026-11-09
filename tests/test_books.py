@@ -9,6 +9,7 @@ from zlib_connector import BookDetails, BookReference, Client, FormatChangedErro
 from zlib_connector.cli import main
 from zlib_connector.credentials import Credentials
 from test_eapi import BOOK, ORIGIN, QueueTransport
+from session_fixture import isolated_sessions
 
 
 class BookTests(unittest.TestCase):
@@ -99,6 +100,7 @@ class BookTests(unittest.TestCase):
         self.assertFalse(any("/search" in call[0] for call in transport.calls))
 
 
+@isolated_sessions
 class BookCliTests(unittest.TestCase):
     def test_anonymous_info_and_formats_do_not_load_credentials(self):
         for command, payload in (("info", {"success": 1, "book": BOOK}),

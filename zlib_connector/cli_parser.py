@@ -7,6 +7,7 @@ from .library import FAVORITE_ORDERS, HISTORY_ORDERS
 from .search import SEARCH_ORDERS
 from .http_cli import add_serve_parser
 from .cli_progress import add_progress_options
+from .cli_session import add_session_options
 
 LIBRARY_COMMANDS = ("library", "favorites", "history", "booklists", "tags")
 DISCOVERY_COMMANDS = ("similar", "popular", "recommended")
@@ -15,11 +16,12 @@ BOOKLIST_MUTATIONS = ("add", "remove", "create", "edit", "delete")
 
 
 def parser() -> argparse.ArgumentParser:
-    result = argparse.ArgumentParser(prog="zlib-cli", description="Z-Library CLI for search, downloads and personal collections. Sessions remain in memory.")
+    result = argparse.ArgumentParser(prog="zlib-cli", description="Z-Library CLI for search, downloads and personal collections.")
     result.add_argument("--domain", default=None, help="override the configured site HTTPS origin")
     result.add_argument("--credentials", type=Path, help="local TOML file (default: credentials.local.toml beside the package)")
     result.add_argument("--timeout", type=float, default=30, help="request deadline in seconds (default: 30)")
     commands = result.add_subparsers(dest="command", required=True)
+    add_session_options(result, commands)
     for name in ("search", "download"):
         command = commands.add_parser(name)
         command.add_argument("query", help="title, author or ISBN; download also accepts ID:HASH or a book URL")

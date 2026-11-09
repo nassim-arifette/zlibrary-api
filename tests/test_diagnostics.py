@@ -7,8 +7,10 @@ from unittest.mock import MagicMock, patch
 from zlib_connector import ChallengeRequired, NetworkError, diagnose_domains
 from zlib_connector.cli import main
 from zlib_connector.transport import Response, Transport
+from session_fixture import isolated_sessions
 
 
+@isolated_sessions
 class DomainDiagnosticsTests(unittest.TestCase):
     def test_real_search_is_probed_with_isolated_clients_and_no_credentials(self):
         requests = []

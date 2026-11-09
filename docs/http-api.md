@@ -2,13 +2,23 @@
 
 Start with `zlib-cli serve`, or `zlib-cli serve --anonymous` for public browsing.
 The default address is `http://127.0.0.1:8000/v1`. Global `--domain`,
-`--credentials` and `--timeout` options go before `serve`.
+`--credentials`, `--timeout`, `--session-file` and `--no-session` options go before
+`serve`.
 
-The server signs in once and keeps one account session in memory. It binds the
-local port before asking for credentials or logging in. All client operations
+Run `zlib-cli login` to save a session first. The server verifies and reuses it,
+or signs in once in memory if no saved session exists. It binds the local port
+before prompting, logging in or verifying the saved session. A failed restore
+does not trigger a password login. `serve --anonymous` ignores account files;
+`--no-session serve` uses only an in-memory login. All client operations
 are serialized, including the read/write sequence of a booklist edit. Stopping
 the server closes its workers before discarding the session. In-flight requests
 may need to finish before shutdown completes.
+
+Stopping the server does not update or erase the saved session. `zlib-cli logout`
+forgets its local cookies but does not affect an already running server or revoke
+the remote session. See [persistent sessions](reference.md#persistent-sessions)
+for storage, domain selection and concurrency behavior. The local HTTP bearer
+token is separate from the saved Z-Library account session.
 
 ## Authorization
 

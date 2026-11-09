@@ -9,6 +9,7 @@ from zlib_connector import Client, Book, AuthenticationError, DownloadError, For
 from zlib_connector.cli import main
 from zlib_connector.transport import Response
 from streaming_fixture import MemoryDownloadTransport
+from session_fixture import isolated_sessions
 
 ORIGIN = 'https://books.example/'
 BOOK = {'id': 123, 'hash': 'ab12', 'title': 'Example', 'author': 'Author', 'extension': 'pdf',
@@ -38,6 +39,7 @@ class QueueTransport(MemoryDownloadTransport):
             return value
         return Response(value if isinstance(value, bytes) else json.dumps(value).encode(), url)
 
+@isolated_sessions
 class EapiTests(unittest.TestCase):
     def test_public_search_parses_real_shape_and_preserves_api_reference(self):
         transport = QueueTransport([{'success':1,'books':[BOOK],'pagination':{'current':1}}])

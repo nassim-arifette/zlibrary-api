@@ -8,6 +8,7 @@ from zlib_connector import AuthenticationError, Book, Client, FormatChangedError
 from zlib_connector.cli import main
 from zlib_connector.credentials import Credentials
 from test_eapi import BOOK, ORIGIN, QueueTransport
+from session_fixture import isolated_sessions
 
 SPARSE_BOOK = {"id": 123, "hash": "ab12", "title": "Example", "author": "Author", "cover": "https://covers.example/book.jpg"}
 
@@ -76,6 +77,7 @@ class DiscoveryTests(unittest.TestCase):
         self.assertEqual(len(transport.calls), 2)
 
 
+@isolated_sessions
 class DiscoveryCliTests(unittest.TestCase):
     def test_anonymous_discovery_does_not_load_credentials(self):
         for args in (["popular", "--anonymous"], ["similar", "123:ab12", "--anonymous"]):

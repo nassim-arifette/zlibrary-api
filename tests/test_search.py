@@ -6,6 +6,7 @@ from unittest.mock import patch
 from zlib_connector import Client, FormatChangedError, SearchFilters
 from zlib_connector.cli import main, shell
 from test_eapi import BOOK, ORIGIN, QueueTransport
+from session_fixture import isolated_sessions
 
 
 class SearchTests(unittest.TestCase):
@@ -118,6 +119,7 @@ class SearchTests(unittest.TestCase):
         self.assertNotIn("\x07", book.size)
 
 
+@isolated_sessions
 class SearchCliTests(unittest.TestCase):
     def test_json_remains_an_array_unless_pagination_is_requested(self):
         for extra, expected_type in (([], list), (["--with-pagination"], dict)):

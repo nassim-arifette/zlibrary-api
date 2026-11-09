@@ -16,6 +16,7 @@ from .pagination import validate_page
 from .my_library import validate_tags
 from .http_cli import run_server
 from .cli_progress import ProgressDisplay
+from .cli_session import AccountSession, local_session_command, session_message
 from .transfer import TransferCancelled
 from .cli_parser import BOOKLIST_MUTATIONS, CATALOG_COMMANDS, DISCOVERY_COMMANDS, LIBRARY_COMMANDS, parser
 from .cli_views import account_confirmation, booklist_options, run_catalog_command, run_library_command, show_books
@@ -85,6 +86,10 @@ def shell(client: Client, *, progress=None):
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     try:
+        if args.command in ("status", "logout"):
+            status = local_session_command(args, client_factory=Client)
+            print(json.dumps(status) if args.json else session_message(status))
+            return 0
         if args.command == "serve":
             run_server(args, client_factory=Client, credentials_loader=load_credentials, prompt=prompt)
             return 0
@@ -155,21 +160,20 @@ def main(argv: list[str] | None = None) -> int:
             with Client(args.domain or "https://z-lib.by/", timeout=args.timeout) as client:
                 run_catalog_command(client, args, filters)
             return 0
-        credentials = load_credentials(args.credentials)
-        with Client(args.domain or credentials.domain, timeout=args.timeout) as client:
+        account = AccountSession(args, credentials_loader=load_credentials)
+        with Client(account.domain, timeout=args.timeout) as client:
             if reference is not None:
                 BookReference.parse(reference, client.domain)
             if account_change and not args.yes:
                 if prompt(account_confirmation(args, client.domain)).lower() not in ("y", "yes"):
                     print("Cancelled.", file=sys.stderr)
                     return 130
-            email = credentials.email or prompt("Email: ")
-            password = credentials.password or getpass.getpass("Password: ", stream=sys.stderr)
-            del credentials
-            try:
-                client.login(email, password)
-            finally:
-                password = ""
+            account.authenticate(client, prompt=prompt,
+                                 password_prompt=lambda label: getpass.getpass(label, stream=sys.stderr))
+            if args.command == "login":
+                print(json.dumps({"authenticated": True, "stored": True, "domain": client.domain})
+                      if args.json else f"Session saved for {client.domain}.")
+                return 0
             if args.command == "auth-test":
                 print(json.dumps({"authenticated": True}))
                 return 0

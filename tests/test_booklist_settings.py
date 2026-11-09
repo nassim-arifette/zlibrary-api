@@ -13,6 +13,7 @@ from zlib_connector.transport import Transport
 from test_eapi import ORIGIN, QueueTransport
 from test_library import LIST, transport_for
 from test_transport import Connection, Reply
+from session_fixture import isolated_sessions
 
 
 SETTINGS = {**LIST, "color": 3, "public": False, "description": "First line\n  Second line\t"}
@@ -155,6 +156,7 @@ class BooklistSettingsTests(unittest.TestCase):
             self.assertEqual(len(transport.calls), 3)
 
 
+@isolated_sessions
 class BooklistSettingsCliTests(unittest.TestCase):
     def test_create_edit_and_delete_return_json(self):
         cases = ((["create", "New"], [{"success": 1, "readlist": {**SETTINGS, "title": "New", "description": "", "color": 0}}]),

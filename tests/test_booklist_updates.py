@@ -9,6 +9,7 @@ from zlib_connector.credentials import Credentials
 from test_eapi import BOOK, ORIGIN, QueueTransport
 from test_library import transport_for
 from test_transport import Connection, Reply
+from session_fixture import isolated_sessions
 
 
 ENTRY = {"book": BOOK, "readlist_books_id": 987, "_isUserSavedBook": True}
@@ -101,6 +102,7 @@ class BooklistUpdateTests(unittest.TestCase):
             self.assertEqual(len(transport.calls), 3)
 
 
+@isolated_sessions
 class BooklistUpdateCliTests(unittest.TestCase):
     def test_updates_return_json_with_an_explicit_yes(self):
         for action, argument in (("add", "123:ab12"), ("remove", "987")):

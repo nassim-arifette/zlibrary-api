@@ -62,9 +62,10 @@ available page counts and navigation in a script.
 zlib-cli --domain https://z-lib.by/ download "Pride and Prejudice" --format epub --output .
 ```
 
-The command signs in, lists the results and asks which one to download. If you
-haven't saved your credentials, it prompts for your email and password. Password
-input is hidden. Downloads support **PDF, EPUB and DjVu** and require an existing
+The command verifies your saved session or signs in, then lists the results and
+asks which one to download. If no session or credentials are saved, it prompts
+for your email and password. Password input is hidden. Downloads support
+**PDF, EPUB and DjVu** and require an existing
 destination folder; `.` means the current folder.
 
 Books are written to disk as they arrive, with progress on stderr when you use
@@ -215,14 +216,45 @@ zlib> download 1 .
 zlib> quit
 ```
 
-Result numbers refer to the most recently displayed page. The session ends when
-you leave the shell. Separate CLI commands currently sign in again each time.
+Result numbers refer to the most recently displayed page. The shell releases its
+in-memory session when you leave; a saved session can be reused by later commands.
 The shell uses the same streaming download and progress display; start it with
 `shell --no-progress` or `shell --progress` to override automatic display.
 
-## Save your sign-in details locally
+## Stay signed in
 
-To avoid entering them for each command, create `credentials.local.toml` in the
+Sign in once and save the session for later commands:
+
+```sh
+zlib-cli --domain https://z-lib.by/ login
+zlib-cli status
+zlib-cli status --verify
+zlib-cli history --json
+zlib-cli logout
+```
+
+`login` prompts for your account details or reads your existing credentials file.
+It saves only the authentication cookies, with private file permissions; it does
+not save your email or password. Later commands, including `serve`, verify and
+reuse that session. If it expires, run `login` again explicitly.
+
+`status` reads local state without connecting. `status --verify` checks the saved
+session with Z-Library. `logout` forgets the local cookies; it does not revoke the
+server session or stop an already running shell or HTTP server.
+
+The saved session belongs to one domain. To use another domain, run `login` with
+that domain explicitly. Use `--no-session` before a command for an in-memory
+connection, or `--session-file PATH` to select a different private session file.
+Anonymous commands ignore saved sessions and credentials entirely.
+
+The default file is `session.json` under `%LOCALAPPDATA%\zlibrary-api` on Windows
+or `${XDG_STATE_HOME:-~/.local/state}/zlibrary-api` on Linux. `ZLIB_STATE_DIR` can
+select another absolute directory. Cookies are protected by file permissions,
+not encrypted; keep custom session files out of Git and shared folders.
+
+## Use a local credentials file
+
+To supply account details for `login`, create `credentials.local.toml` in the
 project folder, next to `pyproject.toml`, or edit it if it already exists:
 
 ```toml
@@ -234,11 +266,15 @@ password = ""
 Fill in your account details locally. Leave the password empty if you prefer to
 enter it at the prompt. This file stores any saved password as plain text, so
 keep it private; Git ignores it. Credentials and session keys stay out of command
-output. Session cookies are currently kept only in memory.
+output. Commands without a saved session retain the original in-memory login
+behavior; only `login` saves a session.
 
 Use `--credentials PATH` before the command to select another file. `--domain`
-overrides its configured domain. Anonymous commands and domain diagnostics never
-load the credentials file.
+overrides its configured domain. When a saved session exists, commands use its
+domain and skip the default credentials file. An explicit `--credentials` file
+still supplies its configured domain. Anonymous commands and domain diagnostics
+never load either file. `auth-test` always tests the supplied credentials without
+reading or saving a persistent session.
 
 ## Run the HTTP API
 
@@ -301,7 +337,8 @@ login examples, return types and errors.
 
 For shell scripts, add `--json` to `search`, `info`, `formats`, `download`,
 `profile`, `quota`, `doctor`, `domains`, `library`, `favorites`, `history` or
-`booklists` or `tags`, as well as `similar`, `popular` and `recommended`. Search normally returns an array;
+`booklists`, `tags`, `login`, `logout`, `status`, `similar`, `popular` or
+`recommended`. Search normally returns an array;
 `--with-pagination` adds a `books` and `pagination` object. Results go to standard
 output, while prompts and errors go to standard error.
 
@@ -311,6 +348,9 @@ output, while prompts and errors go to standard error.
 | --- | --- |
 | A domain is blocked or stops responding | Run `doctor` again and explicitly select a working domain. |
 | Login fails | Check the domain and credentials, then run `auth-test`. Repeated login attempts won't resolve a domain block. |
+| Saved session expired or refused | Run `login` explicitly on the same domain. A temporary network failure leaves the saved session intact. |
+| Session belongs to another domain | Choose its domain, or run `login` explicitly for the new one. |
+| Another process changed the saved session | Inspect `status` before repeating login or logout. |
 | A browser verification challenge | Try another domain reported by `doctor`. This client cannot complete browser challenges. |
 | No downloads remaining | Check `quota` and wait for the account allowance to renew. |
 | A file cannot be saved | Choose an existing writable folder and check available disk space. |
@@ -328,7 +368,6 @@ The next steps focus on your library and reading lists:
   are available.
 - **Reading queues:** import a list, choose editions, skip duplicates and follow
   downloads with progress, cancellation and resume where supported.
-- **Persistent sessions:** reuse a login between commands.
 - **TUI:** browse and manage collections from an interactive terminal, using the
   same core as the API and CLI.
 - **HTTP downloads:** track download jobs and retrieve their files through the API.
