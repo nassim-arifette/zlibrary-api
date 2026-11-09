@@ -152,8 +152,8 @@ the corresponding `downloaded_date` and `downloaded_dateA` instead of save dates
 the server may ignore history ordering. The client preserves the returned order.
 
 Collection reads preserve sparse book records and unsupported formats so books do
-not silently disappear. Fetch details before downloading a sparse record, or pass
-its reference to `download()`. Missing collection arrays are protocol errors;
+not silently disappear. `download()` fetches details if a book's format is absent;
+you can also pass its reference directly. Missing collection arrays are protocol errors;
 explicit empty arrays are valid. Counts and visibility stay unknown when absent.
 Raw owner fields and booklist-entry annotations are not exposed.
 
@@ -187,6 +187,24 @@ The endpoint reference is the [existing Python wrapper](https://github.com/bipin
 Book records now include `is_favorite`: true/false when the service supplies a
 recognized saved flag, otherwise null. Books read from the favorites collection
 are marked true. A missing flag is not interpreted as an unsaved book.
+
+## Discovery
+
+`get_popular()` and `get_similar("ID:HASH")` can be used anonymously where the
+domain permits it. `get_recommendations()` requires login. Each returns the list
+supplied by the server, with validated references and optional metadata. The
+client does not fetch every suggestion's details automatically. An explicit empty
+list is valid; a response missing its books list raises `FormatChangedError`.
+
+The CLI commands are `popular`, `similar ID:HASH` and `recommended`, with `--json`
+and a display `--limit` from 1 to 1000 (default 20). Popular and similar also
+accept `--anonymous`. The display limit trims the server's list locally; it is
+not an upstream pagination or language-filter request.
+
+These methods were checked in read-only calls on 2026-11-09. Public similar and
+popular responses contain sparse records; personalized recommendations also
+returned a books list. `/eapi/book/recently` returned a success marker without a
+books list on that domain, so no recent-additions command is exposed yet.
 
 ## Protocol and safeguards
 

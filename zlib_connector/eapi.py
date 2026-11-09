@@ -8,7 +8,7 @@ from urllib.parse import urlencode, urljoin
 from .client import Book, Client as HtmlClient, SUPPORTED_FORMATS, parse_html, same_origin
 from .errors import AuthenticationError, DownloadError, FormatChangedError, MutationUncertainError, NetworkError, RateLimitError
 from .search import SearchFilters, SearchPage, parse_page, validate_search
-from .books import BookDetails, BookFormat, BookReference, parse_book, parse_details, parse_format
+from .books import BookDetails, BookFormat, BookReference, parse_books, parse_details, parse_format
 from .account import AccountProfile, DownloadQuota, parse_profile
 from .library import FAVORITE_ORDERS, HISTORY_ORDERS, Booklist, FavoriteUpdate, LibraryOverview, booklist_id, parse_booklist
 from .pagination import BookPage, validate_page
@@ -60,17 +60,7 @@ class Client(HtmlClient):
         form = {"message": query, "page": str(page), "limit": str(limit), **filters.to_form(extension)}
         formats = (extension,) if extension else filters.formats or SUPPORTED_FORMATS
         payload = self._json("eapi/book/search", form=form)
-        rows = payload.get("books")
-        if not isinstance(rows, list):
-            raise FormatChangedError("The API search response has no books list.")
-        books = []
-        for row in rows:
-            if not isinstance(row, dict):
-                raise FormatChangedError("The API returned an invalid book record.")
-            fmt = str(row.get("extension", "")).lower()
-            if fmt not in formats:
-                continue
-            books.append(parse_book(row, self.domain))
+        books = parse_books(payload.get("books"), self.domain, formats=formats)
         return parse_page(payload, books[:limit], page, limit)
 
     def iter_search(self, query: str, *, filters: SearchFilters | None = None,
@@ -119,7 +109,7 @@ class Client(HtmlClient):
                 raise FormatChangedError("The API returned an unavailable or invalid booklist entry.")
             rows = [row["book"] for row in rows]
         # Keep sparse and unsupported-format records visible; details can resolve them later.
-        return parse_page(payload, [parse_book(row, self.domain) for row in rows], page, limit)
+        return parse_page(payload, parse_books(rows, self.domain), page, limit)
 
     def _account_books(self, collection: str, *, page: int, limit: int, order: str | None) -> BookPage:
         self._require_login()
@@ -178,6 +168,18 @@ class Client(HtmlClient):
         return LibraryOverview(self.get_favorites(limit=limit), self.get_history(limit=limit),
                                tuple(self.get_booklists()))
 
+    def get_similar(self, reference: str) -> list[Book]:
+        reference = BookReference.parse(reference, self.domain)
+        payload = self._json(f"eapi/book/{reference.book_id}/{reference.book_hash}/similar")
+        return parse_books(payload.get("books"), self.domain)
+
+    def get_popular(self) -> list[Book]:
+        return parse_books(self._json("eapi/book/most-popular").get("books"), self.domain)
+
+    def get_recommendations(self) -> list[Book]:
+        self._require_login()
+        return parse_books(self._json("eapi/user/book/recommended").get("books"), self.domain)
+
     def download(self, book: Book | str, destination: str | Path = ".") -> Path:
         self._require_login()
         folder = Path(destination).resolve(strict=True)
@@ -185,6 +187,10 @@ class Client(HtmlClient):
             raise ValueError("The download destination must be an existing directory.")
         if isinstance(book, str):
             book = self.get_book(book)
+        elif not book.extension:
+            if not same_origin(book.url, self.domain):
+                raise ValueError("Download requires a book from the selected API domain.")
+            book = self.get_book(str(BookReference(book.book_id, book.book_hash)))
         if (not book.book_id.isascii() or not book.book_id.isdigit()
                 or not re.fullmatch(r"[A-Za-z0-9]+", book.book_hash)
                 or book.extension not in SUPPORTED_FORMATS or not same_origin(book.url, self.domain)):

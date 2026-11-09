@@ -105,6 +105,19 @@ def parse_book(row: dict, domain: str) -> Book:
                 book_id=reference.book_id, book_hash=reference.book_hash, is_favorite=saved)
 
 
+def parse_books(rows, domain: str, *, formats: tuple[str, ...] | None = None) -> list[Book]:
+    if not isinstance(rows, list):
+        raise FormatChangedError("The API response has no books list.")
+    books = []
+    for row in rows:
+        if not isinstance(row, dict):
+            raise FormatChangedError("The API returned an invalid book record.")
+        if formats is not None and _text(row.get("extension")).lower() not in formats:
+            continue
+        books.append(parse_book(row, domain))
+    return books
+
+
 class _Description(HTMLParser):
     def __init__(self):
         super().__init__(convert_charrefs=True)

@@ -1,12 +1,9 @@
 # Zlibrary API
 
-Find a book on Z-Library, choose the edition you want, and download it from your
-terminal or Python.
+An API, CLI and TUI for Z-Library.
 
-The project is built around a reading workflow: find books, keep track of what
-you want to read, and bring them into the reader or application you use. The goal
-is to make your Z-Library account and collections available through a CLI, a TUI
-and an HTTP API, with the same behavior across them.
+Search for books, inspect editions, download files and access your favorites,
+booklists and download history.
 
 **Available today:** a Python library, CLI and interactive shell, including
 browsing and updating favorites, reading download history and opening your
@@ -127,6 +124,24 @@ account. Scripts must pass `--yes` explicitly and can add `--json` for the resul
 Saved books carry a `[saved]` marker when their state is known. If a connection
 problem leaves an update unconfirmed, check your favorites before trying again.
 
+## Find your next book
+
+```sh
+zlib-cli popular --anonymous --limit 10
+zlib-cli similar "ID:HASH" --anonymous
+zlib-cli recommended
+```
+
+`popular` shows the service's popular titles, `similar` starts from a book's
+reference, and `recommended` uses your account's recommendations. Add `--json`
+to use the results in a script. `--limit` controls how many books are shown from
+the returned list; these views do not currently expose pagination or filters.
+
+Some suggestions include only a title, author and reference. Open their details
+with `info` or pass the reference to `download` to resolve the available format.
+The recent-additions endpoint currently returns no book list on the tested
+domain, so that view is not available yet.
+
 ## Keep a session open
 
 Use the interactive shell to search and download several books after one login:
@@ -185,7 +200,7 @@ login examples, return types and errors.
 
 For shell scripts, add `--json` to `search`, `info`, `formats`, `download`,
 `profile`, `quota`, `doctor`, `domains`, `library`, `favorites`, `history` or
-`booklists`. Search normally returns an array;
+`booklists`, as well as `similar`, `popular` and `recommended`. Search normally returns an array;
 `--with-pagination` adds a `books` and `pagination` object. Results go to standard
 output, while prompts and errors go to standard error.
 
@@ -209,13 +224,13 @@ The next steps focus on your library and reading lists:
 
 - **Booklists:** create and edit lists, and add or remove books where the service
   supports those operations. Browsing existing lists is available now.
-- **History and discovery:** track local files alongside account history and
-  discover similar books, personal recommendations and popular titles.
+- **Local history:** find downloaded files on your computer and detect missing
+  files or duplicates alongside the account history.
 - **Reading queues:** import a list, choose editions, skip duplicates and follow
   downloads with progress, cancellation and resume where supported.
 - **Persistent sessions:** reuse a login between commands.
-- **TUI and HTTP API:** browse in a full terminal interface or connect another
-  app through a documented API. Both will use the same core as the Python client
+- **TUI and HTTP API:** use Z-Library from an interactive terminal or through
+  documented HTTP endpoints. Both will use the same core as the Python client
   and CLI.
 - **Uploads:** send a book with its metadata and track its processing, once the
   service's upload flow and destination visibility have been verified.

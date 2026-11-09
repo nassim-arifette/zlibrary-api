@@ -18,6 +18,8 @@ from .library import FAVORITE_ORDERS, HISTORY_ORDERS, booklist_id
 from .pagination import validate_page
 
 LIBRARY_COMMANDS = ("library", "favorites", "history", "booklists")
+DISCOVERY_COMMANDS = ("similar", "popular", "recommended")
+CATALOG_COMMANDS = ("search", "info", "formats", *DISCOVERY_COMMANDS)
 
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(prog="zlib-cli", description="Independent Z-Library search/download client. Sessions remain in memory.")
@@ -49,6 +51,14 @@ def parser() -> argparse.ArgumentParser:
         command.add_argument("--json", action="store_true")
     for name in ("profile", "quota"):
         commands.add_parser(name).add_argument("--json", action="store_true")
+    for name in DISCOVERY_COMMANDS:
+        command = commands.add_parser(name, help=f"browse {name} books")
+        if name == "similar":
+            command.add_argument("reference", help="ID:HASH or a book URL on the selected domain")
+        if name != "recommended":
+            command.add_argument("--anonymous", action="store_true", help="do not load or send credentials")
+        command.add_argument("--limit", type=int, default=20, help="maximum books shown from the server's list (default: 20)")
+        command.add_argument("--json", action="store_true")
     for name, orders in (("favorites", FAVORITE_ORDERS), ("history", HISTORY_ORDERS)):
         command = commands.add_parser(name, help=f"browse account {name}")
         command.add_argument("--page", type=int, default=1)
@@ -148,6 +158,26 @@ def show_book_command(client: Client, args):
             for item in formats:
                 support = "" if item.to_dict()["download_supported"] else " (download unsupported)"
                 print(f"{item.book_id}:{item.book_hash} · {item.extension.upper()} · {item.size}{support}")
+
+
+def run_catalog_command(client: Client, args, filters: SearchFilters | None):
+    if args.command == "search":
+        show_search(client, args, filters)
+        return
+    if args.command in ("info", "formats"):
+        show_book_command(client, args)
+        return
+    if args.command == "similar":
+        books = client.get_similar(args.reference)
+    elif args.command == "popular":
+        books = client.get_popular()
+    else:
+        books = client.get_recommendations()
+    books = books[:args.limit]
+    if args.json:
+        print(json.dumps([book.to_dict() for book in books], ensure_ascii=False))
+    else:
+        show_books(books)
 
 
 def run_library_command(client: Client, args):
@@ -284,7 +314,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "booklists" and args.booklist_action == "show":
             booklist_id(args.booklist_id)
             validate_page(args.page, 20)
-        if args.command in ("info", "formats"):
+        if args.command in DISCOVERY_COMMANDS and not 1 <= args.limit <= 1000:
+            raise ValueError("Choose a display limit between 1 and 1000 books.")
+        if args.command in ("info", "formats", "similar"):
             reference = args.reference
         if args.command in ("search", "download"):
             filters = search_filters(args)
@@ -296,12 +328,9 @@ def main(argv: list[str] | None = None) -> int:
                     raise ValueError("Search filters and --pick cannot be used with a direct book reference.")
         if reference is not None:
             BookReference.parse(reference, args.domain)
-        if args.command in ("search", "info", "formats") and args.anonymous:
+        if args.command in CATALOG_COMMANDS and getattr(args, "anonymous", False):
             with Client(args.domain or "https://z-lib.by/", timeout=args.timeout) as client:
-                if args.command == "search":
-                    show_search(client, args, filters)
-                else:
-                    show_book_command(client, args)
+                run_catalog_command(client, args, filters)
             return 0
         credentials = load_credentials(args.credentials)
         with Client(args.domain or credentials.domain, timeout=args.timeout) as client:
@@ -326,11 +355,8 @@ def main(argv: list[str] | None = None) -> int:
             if args.command == "shell":
                 shell(client)
                 return 0
-            if args.command == "search":
-                show_search(client, args, filters)
-                return 0
-            if args.command in ("info", "formats"):
-                show_book_command(client, args)
+            if args.command in CATALOG_COMMANDS:
+                run_catalog_command(client, args, filters)
                 return 0
             if args.command in ("profile", "quota"):
                 profile = client.get_profile()
