@@ -53,6 +53,22 @@ class FileResponse:
             raise _job_error(error) from None
 
 
+@dataclass(frozen=True)
+class EventResponse:
+    manager: object = field(repr=False)
+    task_id: str
+    duration: float
+    after: str | None = None
+
+    @contextmanager
+    def open(self):
+        try:
+            with self.manager.watch(self.task_id, after=self.after) as subscription:
+                yield subscription
+        except JobError as error:
+            raise _job_error(error) from None
+
+
 def file_headers(download):
     """Build attachment headers from public, bounded metadata only."""
     name = download.name
@@ -126,6 +142,8 @@ class DownloadRoutes:
                 return manager.resume()
             if operation == "download_file":
                 return FileResponse(manager, path["task_id"])
+            if operation == "download_events":
+                return EventResponse(manager, path["task_id"], **query)
             raise RuntimeError("Unimplemented download route.")
         except RequestError:
             raise

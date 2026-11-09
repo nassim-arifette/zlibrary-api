@@ -4,14 +4,16 @@ from contextlib import contextmanager
 from dataclasses import replace
 import threading
 import time
+import uuid
 
 from ..books import BookReference
 from ..errors import (AuthenticationError, ChallengeRequired, DownloadError, FormatChangedError,
                       NetworkError, RateLimitError)
 from ..transfer import CancellationToken, TransferCancelled, TransferProgress
+from .events import TaskEvent, TaskSubscription, validate_event_id
 from .files import TaskFiles
 from .models import (JobBusyError, JobCapacityError, JobConflictError, JobError, JobFileError,
-                     JobStateError, TaskPage, TERMINAL_STATES, validate_task_page)
+                     JobStateError, TaskPage, TERMINAL_STATES, validate_task_id, validate_task_page)
 from .store import TaskStore, load_scope_key
 
 
@@ -50,13 +52,18 @@ class DownloadManager:
         self._closing = self._closed = self._blocked = False
         self._active = None
         self._progress = {}
+        self._subscriptions = set()
+        self._event_epoch = uuid.uuid4().hex
+        self._revision = self._queue_revision = 0
         self._scope_key = load_scope_key(self._files.directory)
         with self._client_lock:
             self._scope = client.account_fingerprint(self._scope_key)
             self._domain = client.domain
         self._store = TaskStore(self._files.directory, self._scope, max_tasks=max_tasks)
         try:
-            self._quota_paused = self._store.paused or any(task.state == "waiting_quota" for task in self._store.all())
+            tasks = self._store.all()
+            self._task_revisions = {task.id: 0 for task in tasks}
+            self._quota_paused = self._store.paused or any(task.state == "waiting_quota" for task in tasks)
             self._thread = threading.Thread(target=self._work, name="zlib-download-worker")
             self._thread.start()
         except BaseException:
@@ -79,13 +86,43 @@ class DownloadManager:
         progress = self._progress.get(task.id)
         return replace(task, progress=progress) if progress is not None else task
 
+    def _changed(self, task_id=None):
+        self._revision += 1
+        if task_id is None:
+            self._queue_revision = self._revision
+        else:
+            self._task_revisions[task_id] = self._revision
+        self._condition.notify_all()
+
+    def _event(self, task_id):
+        task = self._view(self._store.get(task_id))
+        revision = max(self._task_revisions[task_id], self._queue_revision)
+        return TaskEvent(f"{self._event_epoch}:{revision}", task, self._quota_paused)
+
+    def watch(self, task_id, *, after=None) -> TaskSubscription:
+        validate_task_id(task_id)
+        if after is not None:
+            validate_event_id(after)
+        with self._condition:
+            self._available()
+            self._store.get(task_id)
+            if len(self._subscriptions) >= 32:
+                raise JobBusyError("The download manager has too many active task subscriptions.")
+            subscription = TaskSubscription(self, task_id, after)
+            self._subscriptions.add(subscription)
+            return subscription
+
     def _update(self, task):
         try:
-            return self._store.update(task)
+            previous = self._view(self._store.get(task.id))
+            updated = self._store.update(task)
         except Exception:
             self._blocked = True
             self._condition.notify_all()
             raise _StorageFailure("Task state could not be recorded. Further downloads have stopped.") from None
+        if previous != self._view(updated):
+            self._changed(task.id)
+        return updated
 
     def _set_paused(self, value):
         try:
@@ -94,7 +131,9 @@ class DownloadManager:
             self._blocked = True
             self._condition.notify_all()
             raise _StorageFailure("Queue state could not be recorded. Further downloads have stopped.") from None
-        self._quota_paused = value
+        if self._quota_paused != value:
+            self._quota_paused = value
+            self._changed()
 
     def submit(self, reference, *, idempotency_key):
         reference = str(BookReference.parse(reference, self._domain))
@@ -108,6 +147,8 @@ class DownloadManager:
                 self._blocked = True
                 self._condition.notify_all()
                 raise
+            if task.id not in self._task_revisions:
+                self._changed(task.id)
             self._condition.notify_all()
             return self._view(task)
 
@@ -173,6 +214,8 @@ class DownloadManager:
                 if self._closed:
                     return
                 self._closing = True
+                for subscription in tuple(self._subscriptions):
+                    subscription._close_locked()
                 if self._active is not None:
                     self._active[1].cancel()
                 self._condition.notify_all()
@@ -221,7 +264,13 @@ class DownloadManager:
             finally:
                 with self._condition:
                     self._active = None
-                    self._progress.pop(task.id, None)
+                    progress = self._progress.pop(task.id, None)
+                    if progress is not None:
+                        try:
+                            if progress != self._store.get(task.id).progress:
+                                self._changed(task.id)
+                        except Exception:
+                            self._blocked = True
                     self._condition.notify_all()
 
     @contextmanager
@@ -260,8 +309,9 @@ class DownloadManager:
                 if not isinstance(value, TransferProgress):
                     raise ValueError("A transfer supplied invalid progress.")
                 with self._condition:
-                    self._progress[task.id] = value
-                    self._condition.notify_all()
+                    if self._progress.get(task.id) != value:
+                        self._progress[task.id] = value
+                        self._changed(task.id)
 
             result = client.download(task.reference, owned.path, progress=progress, cancel=token)
             if client.account_fingerprint(self._scope_key) != self._scope:

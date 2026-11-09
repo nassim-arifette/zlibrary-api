@@ -78,9 +78,10 @@ class Field:
     def _scalar(self, value, *, query):
         if self.kind in ("integer", "number"):
             if query:
-                if not isinstance(value, str) or not re.fullmatch(r"[0-9]{1,12}", value):
+                pattern = r"[0-9]{1,12}" if self.kind == "integer" else r"[0-9]{1,12}(?:\.[0-9]{1,12})?"
+                if not isinstance(value, str) or not re.fullmatch(pattern, value):
                     raise ValueError
-                value = int(value)
+                value = int(value) if self.kind == "integer" else float(value)
             if (self.kind == "integer" and type(value) is not int
                     or self.kind == "number" and type(value) not in (int, float)):
                 raise ValueError
@@ -144,6 +145,7 @@ class Endpoint:
     mutation: bool = False
     partial: bool = False
     binary: bool = False
+    events: bool = False
 
     @property
     def parameters(self):
@@ -163,6 +165,7 @@ class Endpoint:
 PAGE = Field("integer", default=1, minimum=1, maximum=1000)
 LIMIT = Field("integer", default=20, minimum=1, maximum=50)
 REFERENCE = Field(required=True, min_length=3, max_length=150, pattern=r"[0-9]{1,20}:[A-Za-z0-9]{1,128}")
+EVENT_ID = Field(min_length=34, max_length=53, pattern=r"[0-9a-f]{32}:[0-9]{1,20}")
 PATH_FIELDS = {
     "book_id": Field(required=True, min_length=1, max_length=20, pattern=r"[0-9]{1,20}"),
     "book_hash": Field(required=True, min_length=1, max_length=128, pattern=r"[A-Za-z0-9]{1,128}"),
@@ -232,6 +235,8 @@ ENDPOINTS = (
     Endpoint("GET", "/v1/downloads/{task_id}", "download_get", "Read task state and current transfer progress", "DownloadTask"),
     Endpoint("POST", "/v1/downloads/{task_id}/cancel", "download_cancel", "Persist a cancellation request; a published file keeps its success", "DownloadTask"),
     Endpoint("GET", "/v1/downloads/{task_id}/file", "download_file", "Download the owned file of a succeeded task; byte ranges are unsupported", "DownloadFile", binary=True),
+    Endpoint("GET", "/v1/downloads/{task_id}/events", "download_events", "Observe complete task states in a finite event stream", "TaskEventStream", query={
+        "duration": Field("number", default=30, minimum=1, maximum=60), "after": EVENT_ID}, events=True),
 )
 
 
@@ -317,6 +322,9 @@ def schemas():
             "paused": {"type": "boolean", "description": "Pending downloads remain paused after a quota or rate limit until an explicit resume."}}),
         "DownloadResume": object_schema({"resumed": {"type": "integer", "minimum": 0}}),
         "DownloadFile": {"type": "string", "format": "binary", "description": "The task's complete pinned file; never a local path or an arbitrary file."},
+        "TaskEvent": object_schema({"id": EVENT_ID.schema(), "task": _ref("DownloadTask"), "paused": {"type": "boolean"}}),
+        "TaskEventEnd": object_schema({"reason": {"type": "string", "enum": ["terminal", "duration", "shutdown"]}}),
+        "TaskEventStream": {"type": "string", "description": "UTF-8 SSE frames: event: task, id: cursor and data: compact TaskEvent JSON; comments are heartbeats. A final event: end carries TaskEventEnd JSON. Each frame is at most 64 KiB."},
     }
 
 
@@ -326,6 +334,8 @@ def openapi_document():
         content = ({media: {"schema": _ref(route.response)} for media in
                     ("application/octet-stream", "application/pdf", "application/epub+zip", "image/vnd.djvu")}
                    if route.binary else {"application/json": {"schema": _ref(route.response)}})
+        if route.events:
+            content = {"text/event-stream": {"schema": _ref(route.response)}}
         operation = {"operationId": route.operation, "summary": route.summary,
                      "responses": {str(route.status): {"description": "Success", "content": content}}}
         if route.operation.startswith("download_"):
@@ -339,6 +349,10 @@ def openapi_document():
                 "Accept-Ranges": {"schema": {"type": "string", "const": "none"}}}
             operation["description"] += " Range and If-Range are rejected. A changed file is refused before headers; a later read failure terminates the stream, so clients must verify Content-Length."
         parameters = [{"name": name, "in": "path", "required": True, "schema": PATH_FIELDS[name].schema()} for name in route.parameters]
+        if route.events:
+            parameters.append({"name": "Last-Event-ID", "in": "header", "required": False, "schema": EVENT_ID.schema(),
+                               "description": "Alternative to after; supplying both is rejected."})
+            operation["description"] += " Supply after or Last-Event-ID, never both. This is a coalesced full-state observation, not transition replay: stale or foreign cursors yield the latest snapshot, and terminal state is always sent once. Streams last 1–60 seconds, with comments at most five seconds apart, and end with terminal, duration or shutdown. At most four streams and half the connection slots (minimum one) are allowed concurrently; excess streams receive 503. No Content-Length, Transfer-Encoding or compression. Errors after headers terminate the stream without appending JSON. Browser clients must use fetch with a bearer header; native EventSource cannot set Authorization."
         for name, spec in route.query.items():
             parameter = {"name": name, "in": "query", "required": spec.required, "schema": spec.schema()}
             if spec.repeated:
