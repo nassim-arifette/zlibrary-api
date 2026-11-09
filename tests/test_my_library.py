@@ -72,13 +72,15 @@ class MyLibraryTests(unittest.TestCase):
         transport = transport_for()
         invalid = [("../account", ["Science"]), ("https://other.example/book/123/ab12", ["Science"]),
                    ("123:ab12", []), ("123:ab12", "Science"), ("123:ab12", [" "]),
-                   ("123:ab12", ["x" * 31]), ("123:ab12", ["unsafe\x1b"])]
+                   ("123:ab12", ["unsafe\x1b"])]
         with Client(ORIGIN, transport=transport) as client:
             client.login("synthetic", "synthetic")
             for method in (client.add_book_tags, client.remove_book_tags):
                 for reference, tags in invalid:
                     with self.subTest(method=method.__name__, reference=reference, tags=tags), self.assertRaises(ValueError):
                         method(reference, tags)
+            with self.assertRaises(ValueError):
+                client.add_book_tags("123:ab12", ["x" * 31])
         self.assertEqual(len(transport.calls), 2)
 
     def test_unreadable_mutation_responses_are_uncertain_and_not_retried(self):
@@ -134,6 +136,17 @@ class MyLibraryTests(unittest.TestCase):
 
 
 class MyLibraryCliTests(unittest.TestCase):
+    def test_existing_long_label_can_be_removed_without_changing_its_identity(self):
+        label = "A legacy tag longer than thirty characters"
+        transport = transport_for({"success": 1})
+        output = io.StringIO()
+        with patch("zlib_connector.cli.Client", return_value=Client(ORIGIN, transport=transport)), \
+                patch("zlib_connector.cli.load_credentials", return_value=Credentials(ORIGIN, "synthetic", "synthetic")), \
+                patch("sys.stdout", output):
+            self.assertEqual(main(["tags", "remove", "123:ab12", label, "--yes", "--json"]), 0)
+        self.assertEqual(transport.json_bodies[-1], {"tags": [label]})
+        self.assertEqual(json.loads(output.getvalue())["tags"], [label])
+
     def test_catalog_alias_and_saved_ids_have_stable_json_shapes(self):
         for command, payload, expected in (
             (["tags", "--json"], {"tags": []}, {"tags": []}),

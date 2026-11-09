@@ -163,7 +163,7 @@ class Client(HtmlClient):
     def _update_book_tags(self, reference: str, tags, *, action: str) -> BookTagUpdate:
         self._require_login()
         reference = BookReference.parse(reference, self.domain)
-        tags = validate_tags(tags)
+        tags = validate_tags(tags, for_removal=action == "remove")
         self._json(f"papi/my-library/tags/{reference.book_id}",
                    method="PUT" if action == "add" else "DELETE", json_body={"tags": list(tags)}, mutation=True)
         return BookTagUpdate(reference.book_id, action, tags)

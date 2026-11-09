@@ -114,7 +114,7 @@ def main(argv: list[str] | None = None) -> int:
                 raise ValueError("List pagination and ordering cannot be used with a favorite update.")
         if tag_change:
             reference = args.reference
-            validate_tags(args.tags)
+            validate_tags(args.tags, for_removal=args.tag_action == "remove")
         if args.command in ("favorites", "history", "library"):
             validate_page(getattr(args, "page", 1), args.limit)
         if args.command == "booklists" and args.booklist_action in ("show", "add", "remove", "edit", "delete"):

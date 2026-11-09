@@ -193,9 +193,10 @@ The endpoint reference is the [existing Python wrapper](https://github.com/bipin
 | `add_book_tags(reference, tags)` | `tags add ID:HASH LABEL [LABEL ...]` | `BookTagUpdate`. Also adds the book to favorites. |
 | `remove_book_tags(reference, tags)` | `tags remove ID:HASH LABEL [LABEL ...]` | `BookTagUpdate`. Keeps the favorite. |
 
-All four require login. Mutations require a nonempty list or tuple of labels,
-each nonblank and at most 30 UTF-16 code units, matching the website's length
-limit. Control characters are rejected. Exact duplicates are removed, but case,
+All four require login. Mutations require a nonempty list or tuple of nonblank
+labels. New labels are limited to 30 UTF-16 code units, matching the website's
+input limit; removing an existing longer label is allowed. Control characters
+are rejected. Exact duplicates are removed, but case,
 spaces and Unicode spelling are preserved. The service enforces the combined
 tag limit for the book. The catalog exposes names only; its opaque values are
 not interpreted as counts or colors. An empty upstream `[]` catalog is valid.

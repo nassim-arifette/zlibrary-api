@@ -66,20 +66,23 @@ def parse_saved_book_ids(payload: dict) -> tuple[str, ...]:
     return tuple(result)
 
 
-def validate_tags(tags: tuple[str, ...] | list[str]) -> tuple[str, ...]:
+def validate_tags(tags: tuple[str, ...] | list[str], *, for_removal: bool = False) -> tuple[str, ...]:
     """Validate a mutation and remove exact duplicates, preserving label spelling.
 
     No trimming, case folding, Unicode normalization, or comma splitting is
     applied: the supplied strings identify the tags to add or remove. The
     website's 30-character limit is measured in JavaScript UTF-16 code units.
+    The creation length limit does not prevent removing older, longer labels.
     Existing tags on the book and their combined limit are checked upstream.
     """
     if not isinstance(tags, (tuple, list)) or not tags:
         raise ValueError("Provide at least one My Library tag as a list or tuple.")
     result = []
     for tag in tags:
-        if not _safe_tag(tag) or len(tag.encode("utf-16-le")) // 2 > 30:
-            raise ValueError("Each My Library tag must contain 1–30 characters without control characters.")
+        if not _safe_tag(tag):
+            raise ValueError("Each My Library tag must be nonblank and contain no control characters.")
+        if not for_removal and len(tag.encode("utf-16-le")) // 2 > 30:
+            raise ValueError("New My Library tags must contain at most 30 UTF-16 code units.")
         if tag not in result:
             result.append(tag)
     return tuple(result)
