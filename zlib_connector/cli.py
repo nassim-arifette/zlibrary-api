@@ -15,6 +15,7 @@ from .booklists import BooklistSettings, booklist_entry_id, booklist_id, validat
 from .pagination import validate_page
 from .my_library import validate_tags
 from .http_cli import run_server
+from .cli_jobs import run_jobs
 from .cli_progress import ProgressDisplay
 from .cli_session import AccountSession, local_session_command, session_message
 from .transfer import TransferCancelled
@@ -86,6 +87,9 @@ def shell(client: Client, *, progress=None):
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     try:
+        if args.command == "jobs":
+            run_jobs(args)
+            return 0
         if args.command in ("status", "logout"):
             status = local_session_command(args, client_factory=Client)
             print(json.dumps(status) if args.json else session_message(status))

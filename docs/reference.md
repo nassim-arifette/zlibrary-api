@@ -256,8 +256,9 @@ have to return or reach their normal timeout first. Keep progress callbacks
 short; the client does not interrupt user callback code. Ctrl+C also unwinds the temporary file and
 closes the connection. The CLI returns 130 for interruption. No operation is
 automatically repeated, because obtaining a link may already consume quota.
-Interrupted partial files are removed; resumable downloads and HTTP download
-jobs remain planned.
+Interrupted partial files are removed; byte-range resume remains planned.
+For persistent tasks, progress polling and file retrieval through Python, HTTP
+or the CLI, see [download tasks](download-tasks.md).
 
 `Transport.download_to(url, binary_stream, progress=None, cancel=None)` is the
 lower-level streaming operation and returns the number of received bytes. It

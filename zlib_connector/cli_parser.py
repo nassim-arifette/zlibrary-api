@@ -8,6 +8,7 @@ from .search import SEARCH_ORDERS
 from .http_cli import add_serve_parser
 from .cli_progress import add_progress_options
 from .cli_session import add_session_options
+from .cli_jobs import add_jobs_parser
 
 LIBRARY_COMMANDS = ("library", "favorites", "history", "booklists", "tags")
 DISCOVERY_COMMANDS = ("similar", "popular", "recommended")
@@ -22,6 +23,7 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--timeout", type=float, default=30, help="request deadline in seconds (default: 30)")
     commands = result.add_subparsers(dest="command", required=True)
     add_session_options(result, commands)
+    add_jobs_parser(commands)
     for name in ("search", "download"):
         command = commands.add_parser(name)
         command.add_argument("query", help="title, author or ISBN; download also accepts ID:HASH or a book URL")

@@ -383,7 +383,7 @@ class HttpApiTests(unittest.TestCase):
             status, headers, _ = request(server, "PUT", "/v1/booklists", body={})
             self.assertEqual(405, status)
             self.assertEqual("GET, POST", headers["Allow"])
-            for path in ("/v1/login", "/v1/downloads", "/v1/my-library", "/v1/files/C:/secret"):
+            for path in ("/v1/login", "/v1/my-library", "/v1/files/C:/secret"):
                 self.assertEqual(404, request(server, "GET", path)[0])
             self.assertEqual(400, request(server, "GET", "/v1/health", body={})[0])
             self.assertEqual([], client.calls)
@@ -566,12 +566,13 @@ class HttpApiTests(unittest.TestCase):
         with running() as (server, _):
             self.assertEqual(document, request(server, "GET", "/v1/openapi.json")[2])
             operations = request(server, "GET", "/v1/capabilities")[2]["operations"]
-        self.assertEqual(set(operations), {value["operationId"] for route in document["paths"].values() for value in route.values()})
+        self.assertEqual(set(operations), {value["operationId"] for route in document["paths"].values()
+            for value in route.values() if not value["operationId"].startswith("download_")})
         create = document["paths"]["/v1/booklists"]["post"]
         self.assertIn("201", create["responses"])
         self.assertFalse(create["requestBody"]["content"]["application/json"]["schema"]["additionalProperties"])
         self.assertEqual(1, document["paths"]["/v1/booklists/{booklist_id}"]["patch"]["requestBody"]["content"]["application/json"]["schema"]["minProperties"])
-        self.assertNotIn("/v1/downloads", document["paths"])
+        self.assertIn("/v1/downloads", document["paths"])
         self.assertNotIn("/v1/my-library", document["paths"])
 
 

@@ -80,6 +80,12 @@ paths contain the numeric book ID and alphanumeric hash from a search result.
 | `POST /booklists/{id}/books` | Add `{"reference":"ID:HASH"}`. |
 | `DELETE /booklists/{id}/entries/{entry_id}` | Remove a membership entry, not a catalog book ID. |
 | `GET /discovery/popular`, `GET /discovery/recommended` | Popular titles and account recommendations. |
+| `POST /downloads` | Submit `{reference, idempotency_key}`; returns a task and HTTP 202. |
+| `GET /downloads?limit=50&offset=0` | Tasks for the current account and domain, oldest first. |
+| `GET /downloads/{task_id}` | Current state and progress, without waiting for a transfer. |
+| `POST /downloads/{task_id}/cancel` | Request cancellation; no JSON body. |
+| `POST /downloads/resume` | Requeue tasks waiting for quota; no JSON body. |
+| `GET /downloads/{task_id}/file` | Retrieve a completed file as a binary attachment. |
 
 The history route reads **Z-Library's account download history**. It does not
 scan this computer or claim that downloaded files are still present. Its
@@ -94,10 +100,15 @@ interactive CLI confirmation. New booklists are private unless `is_public` is
 true. Tag additions report `adds_to_favorites: true`. Edits have the upstream
 concurrency limitations described in the [reference](reference.md).
 
-The API currently has no HTTP login/logout, download jobs or file retrieval,
-upload routes, local download database, or full native My Library pages.
-The Python client and CLI continue to support downloads. Anonymous mode exposes
-the same routes, but account operations return an authentication error.
+Download routes require `serve --download-dir PATH` and an authenticated account.
+They return 503 while disabled, and `/capabilities` reports that configuration.
+The [task guide](download-tasks.md) covers idempotency, quota waits, cancellation,
+restart behavior and file retrieval. Task reads and cancellation remain available
+while the worker holds the upstream client lock.
+
+The API currently has no HTTP login/logout, upload routes or full native My
+Library pages. Anonymous mode exposes the same collection routes, but account
+operations return an authentication error; download tasks cannot be enabled.
 
 ## Errors and limits
 
@@ -118,6 +129,9 @@ bearer, 403 for a rejected Host or Origin, 404/405 for unknown routes/methods,
 404 `booklist_not_found` when an editable list is absent (no write was attempted),
 424 for a missing/expired upstream account session, 429 for an upstream limit,
 502/504 for upstream failures, and 503 when the local server or client is busy.
+Task errors include 404 for an unknown task, 409 for a reused key with a different
+reference or a file that is not ready, 410 for a missing/changed completed file,
+and 503 for disabled tasks, unavailable storage or a full registry.
 
 Requests are bounded to an 8 KiB request line, 4 KiB query, 16 KiB headers,
 64 header fields and 64 KiB JSON body. The default read deadline is five seconds,
@@ -142,7 +156,9 @@ with create_server(client, token=token, port=8000) as server:
 ```
 
 The server does not close the injected client. Stop and close the server before
-closing that client. If serving on another thread, call `shutdown()` from the
+closing that client. To enable tasks for an authenticated client, pass
+`download_dir=existing_directory` and optionally `max_download_tasks=1000`.
+The server owns and closes its download worker. If serving on another thread, call `shutdown()` from the
 controlling thread, then `server_close()`. `openapi_document()` returns the same
 contract as the authenticated HTTP route without starting a server.
 

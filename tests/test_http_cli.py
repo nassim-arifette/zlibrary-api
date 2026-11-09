@@ -82,6 +82,43 @@ class FakeServer:
 
 @isolated_sessions
 class HttpCliTests(unittest.TestCase):
+    def test_download_worker_starts_after_authentication_and_failure_closes_client(self):
+        for failure in (False, True):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as folder:
+                events = []
+                client = FakeClient(events)
+                server = FakeServer(events)
+
+                def enable(directory, *, max_tasks):
+                    self.assertEqual(Path(folder), directory)
+                    self.assertEqual(25, max_tasks)
+                    events.append("enable_downloads")
+                    if failure:
+                        raise ValueError("Synthetic inaccessible task directory")
+
+                server.enable_downloads = enable
+                args = options("serve", "--download-dir", folder, "--max-download-tasks", "25")
+                with redirect_stderr(io.StringIO()):
+                    try:
+                        run_server(args, client_factory=lambda *a, **k: client,
+                                   credentials_loader=lambda path: Credentials(email="synthetic", password="synthetic"),
+                                   server_factory=lambda *a, **k: server)
+                    except ValueError:
+                        self.assertTrue(failure)
+                expected = ["client_enter", "server_enter", "login", "enable_downloads"]
+                self.assertEqual(expected + ([] if failure else ["serve"]) + ["server_close", "client_close"], events)
+
+    def test_bad_task_configuration_does_not_create_token_or_read_account(self):
+        with tempfile.TemporaryDirectory() as folder:
+            token = Path(folder) / "absent-token"
+            for flags in (("--anonymous", "--download-dir", folder),
+                          ("--download-dir", str(Path(folder) / "absent")),
+                          ("--max-download-tasks", "0"), ("--max-download-tasks", "10001")):
+                with self.subTest(flags=flags), self.assertRaises(ValueError):
+                    run_server(options("serve", "--token-file", str(token), *flags),
+                               credentials_loader=Mock(side_effect=AssertionError("Account was opened")))
+                self.assertFalse(token.exists())
+
     def save_session(self):
         session = SavedSession("https://saved.example/", (
             SessionCookie("remix_userid", "123"), SessionCookie("remix_userkey", "synthetic-secret")),

@@ -1,7 +1,8 @@
 """Bounded loopback HTTP transport for one caller-owned, serialized Client.
 
-This server deliberately does not accept account credentials over HTTP, perform
-downloads, or expose local files. It is not an Internet-facing web server.
+This server does not accept account credentials over HTTP or expose arbitrary
+local files. Optional download tasks own their configured directory and files.
+It is not an Internet-facing web server.
 """
 
 from contextlib import contextmanager
@@ -21,6 +22,7 @@ from ..errors import (AuthenticationError, BooklistNotFoundError, ChallengeRequi
 from ..search import SearchFilters
 from ..my_library import validate_tags
 from .contract import ENDPOINTS, RequestError, openapi_document, resolve, validate_fields
+from . import downloads as download_api
 
 
 MAX_TARGET = 8192
@@ -123,7 +125,8 @@ class HttpApiServer(ThreadingHTTPServer):
     request_queue_size = 8
 
     def __init__(self, client, *, token, host="127.0.0.1", port=8000, allowed_origins=(),
-                 diagnostics=diagnose_domains, max_connections=8, request_timeout=5):
+                 diagnostics=diagnose_domains, max_connections=8, request_timeout=5,
+                 download_dir=None, max_download_tasks=1000):
         if not isinstance(token, str) or not re.fullmatch(r"[A-Za-z0-9._~-]{32,256}", token):
             raise ValueError("The API bearer token must contain 32 to 256 URL-safe ASCII characters.")
         host = "127.0.0.1" if host == "localhost" else host
@@ -149,10 +152,29 @@ class HttpApiServer(ThreadingHTTPServer):
         self.request_timeout = request_timeout
         self._client_lock = threading.Lock()
         self._connections = threading.BoundedSemaphore(max_connections)
+        self._downloads = download_api.DownloadRoutes(client, self._client_lock)
         super().__init__((str(address), port), _Handler)
         actual_port = self.server_address[1]
         suffix = "" if actual_port == 80 else f":{actual_port}"
         self.allowed_hosts = frozenset((str(address) + suffix, "localhost" + suffix))
+        if download_dir is not None:
+            try:
+                self.enable_downloads(download_dir, max_tasks=max_download_tasks)
+            except BaseException:
+                self.server_close()
+                raise
+
+    def enable_downloads(self, directory, *, max_tasks=1000):
+        """Enable tasks after binding and authenticating the caller-owned Client."""
+        self._downloads.enable(directory, max_tasks=max_tasks)
+
+    def server_close(self):
+        # Stop admission and join the worker before the caller can close Client.
+        # Active file contexts hold their own pinned descriptors until handlers end.
+        try:
+            self._downloads.close()
+        finally:
+            super().server_close()
 
     def process_request(self, request, client_address):
         if not self._connections.acquire(blocking=False):
@@ -197,13 +219,19 @@ class HttpApiServer(ThreadingHTTPServer):
         if operation == "health":
             return {"status": "ok", "api_version": "v1", "upstream_status": "not_checked"}
         if operation == "capabilities":
+            downloads_enabled = self._downloads.enabled
             return {"api_version": "v1", "authentication": "bearer", "client_access": "serialized",
-                    "operations": [endpoint.operation for endpoint in ENDPOINTS],
-                    "unavailable": ["http_login", "http_downloads", "native_my_library_pages", "local_download_history", "uploads"]}
+                    "operations": [endpoint.operation for endpoint in ENDPOINTS
+                                   if downloads_enabled or not endpoint.operation.startswith("download_")],
+                    "unavailable": ["http_login", "native_my_library_pages", "local_download_history", "uploads"]
+                                   + ([] if downloads_enabled else ["http_downloads"]),
+                    "downloads_enabled": downloads_enabled}
         if operation == "openapi":
             return openapi_document()
         if operation == "domains":
             return {"domains": list(KNOWN_DOMAINS), "probed": False}
+        if operation.startswith("download_"):
+            return self._downloads.execute(operation, path, query, body)
         reference = f"{path['book_id']}:{path['book_hash']}" if "book_id" in path else None
         # Validate cross-field constraints before acquiring the account lock or
         # initiating any upstream operation.
@@ -361,6 +389,8 @@ class _Handler(BaseHTTPRequestHandler):
                 or not hmac.compare_digest(parts[1], self.server._token)):
             raise RequestError(401, "unauthorized", "A valid API bearer token is required.", headers={"WWW-Authenticate": "Bearer"})
         route, path_values = resolve(command, path)
+        if route.binary and ("range" in headers or "if-range" in headers):
+            raise RequestError(400, "range_not_supported", "Byte ranges are not supported for task files.")
         try:
             pairs = parse_qsl(raw_query, keep_blank_values=True, strict_parsing=True, encoding="utf-8", errors="strict", max_num_fields=128)
         except (ValueError, UnicodeDecodeError):
@@ -397,40 +427,78 @@ class _Handler(BaseHTTPRequestHandler):
         self._origin = None
         self._buffer = b""
         self._deadline = monotonic() + self.server.request_timeout
+        self._response_started = False
         route = None
         try:
             route, path, query, body = self._request()
             if route is None:
                 self._send(204, None, body)
             else:
-                self._send(route.status, self.server.execute(route, path, query, body))
+                result = self.server.execute(route, path, query, body)
+                if isinstance(result, download_api.FileResponse):
+                    self._send_file(result)
+                else:
+                    self._send(route.status, result)
         except RequestError as error:
-            self._send(error.status, error.to_dict(), error.headers)
+            if not self._response_started:
+                self._send(error.status, error.to_dict(), error.headers)
         except (TimeoutError, socket.timeout):
-            self._send(408, RequestError(408, "request_timeout", "The HTTP request took too long.").to_dict())
+            if not self._response_started:
+                self._send(408, RequestError(408, "request_timeout", "The HTTP request took too long.").to_dict())
         except (ConnectionError, OSError):
             pass
         except Exception as error:
-            failure = _upstream_error(error, mutation=route is not None and route.mutation)
-            self._send(failure.status, failure.to_dict())
+            if not self._response_started:
+                failure = _upstream_error(error, mutation=route is not None and route.mutation)
+                self._send(failure.status, failure.to_dict())
         finally:
             _finish_response(self.connection)
 
-    def _send(self, status, payload, headers=None):
-        data = b"" if payload is None else json.dumps(payload, ensure_ascii=True, allow_nan=False, separators=(",", ":")).encode("utf-8")
-        self.connection.settimeout(self.server.request_timeout)
+    def _headers(self, status, headers):
         reason = self.responses.get(status, ("Error",))[0]
-        response_headers = {"Content-Type": "application/json; charset=utf-8", "Content-Length": str(len(data)),
-                            "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "Connection": "close", "Vary": "Origin"}
+        response_headers = {"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "Connection": "close", "Vary": "Origin"}
         if self._origin:
             response_headers["Access-Control-Allow-Origin"] = self._origin
         response_headers.update(headers or {})
         output = f"HTTP/1.1 {status} {reason}\r\n" + "".join(f"{name}: {value}\r\n" for name, value in response_headers.items()) + "\r\n"
+        return output.encode("ascii")
+
+    def _send(self, status, payload, headers=None):
+        data = b"" if payload is None else json.dumps(payload, ensure_ascii=True, allow_nan=False, separators=(",", ":")).encode("utf-8")
+        self.connection.settimeout(self.server.request_timeout)
+        output = self._headers(status, {"Content-Type": "application/json; charset=utf-8", "Content-Length": str(len(data)), **(headers or {})})
+        self._response_started = True
         try:
-            self.wfile.write(output.encode("ascii") + data)
+            self.wfile.write(output + data)
             self.wfile.flush()
         except OSError:
             pass
+
+    def _send_file(self, response):
+        with response.open() as download:
+            headers = download_api.file_headers(download)
+            deadline = monotonic() + download_api.FILE_RESPONSE_TIMEOUT
+
+            def set_deadline():
+                remaining = deadline - monotonic()
+                if remaining <= 0:
+                    raise TimeoutError
+                self.connection.settimeout(remaining)
+
+            set_deadline()
+            self._response_started = True
+            self.wfile.write(self._headers(200, headers))
+            remaining = download.size
+            while remaining:
+                set_deadline()
+                limit = min(download_api.FILE_CHUNK_SIZE, remaining)
+                chunk = download.stream.read(limit)
+                if not isinstance(chunk, (bytes, bytearray, memoryview)) or not 0 < len(chunk) <= limit:
+                    raise OSError("The task file could not be read completely.")
+                set_deadline()
+                self.wfile.write(chunk)
+                remaining -= len(chunk)
+            self.wfile.flush()
 
 
 def _unique_object(pairs):
@@ -447,7 +515,9 @@ def _invalid_constant(value):
 
 
 def create_server(client, *, token, host="127.0.0.1", port=8000, allowed_origins=(),
-                  diagnostics=diagnose_domains, max_connections=8, request_timeout=5):
+                  diagnostics=diagnose_domains, max_connections=8, request_timeout=5,
+                  download_dir=None, max_download_tasks=1000):
     """Create a loopback API without taking ownership of the Client or secrets."""
     return HttpApiServer(client, token=token, host=host, port=port, allowed_origins=allowed_origins,
-                         diagnostics=diagnostics, max_connections=max_connections, request_timeout=request_timeout)
+                         diagnostics=diagnostics, max_connections=max_connections, request_timeout=request_timeout,
+                         download_dir=download_dir, max_download_tasks=max_download_tasks)

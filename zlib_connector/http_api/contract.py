@@ -7,6 +7,7 @@ import unicodedata
 
 from ..library import FAVORITE_ORDERS, HISTORY_ORDERS
 from ..search import SEARCH_ORDERS
+from ..jobs.models import TASK_STATES, TASK_ERROR_CODES
 
 
 class RequestError(Exception):
@@ -142,6 +143,7 @@ class Endpoint:
     status: int = 200
     mutation: bool = False
     partial: bool = False
+    binary: bool = False
 
     @property
     def parameters(self):
@@ -166,6 +168,7 @@ PATH_FIELDS = {
     "book_hash": Field(required=True, min_length=1, max_length=128, pattern=r"[A-Za-z0-9]{1,128}"),
     "booklist_id": Field(required=True, min_length=1, max_length=20, pattern=r"[1-9][0-9]{0,19}"),
     "entry_id": Field(required=True, min_length=1, max_length=20, pattern=r"[1-9][0-9]{0,19}"),
+    "task_id": Field(required=True, min_length=32, max_length=32, pattern=r"[0-9a-f]{32}"),
 }
 SETTINGS = {
     "title": Field(min_length=1, max_length=120),
@@ -219,6 +222,16 @@ ENDPOINTS = (
     Endpoint("DELETE", "/v1/booklists/{booklist_id}/entries/{entry_id}", "booklist_remove", "Remove an entry by membership ID, not catalog ID", "BooklistBookUpdate", mutation=True),
     Endpoint("GET", "/v1/discovery/popular", "popular", "List popular books", "Books"),
     Endpoint("GET", "/v1/discovery/recommended", "recommended", "List account recommendations", "Books"),
+    Endpoint("POST", "/v1/downloads", "download_submit", "Persist a download task; reuse its key to replay the same submission", "DownloadTask", body={
+        "reference": Field(required=True, min_length=3, max_length=2048),
+        "idempotency_key": Field(required=True, min_length=8, max_length=128, pattern=r"[A-Za-z0-9._~-]{8,128}")}, status=202),
+    Endpoint("GET", "/v1/downloads", "download_list", "List persisted tasks in insertion order", "TaskPage", query={
+        "limit": Field("integer", default=50, minimum=1, maximum=1000),
+        "offset": Field("integer", default=0, minimum=0, maximum=10000)}),
+    Endpoint("POST", "/v1/downloads/resume", "download_resume", "Clear the quota pause and resume waiting tasks; never retry failed tasks", "DownloadResume"),
+    Endpoint("GET", "/v1/downloads/{task_id}", "download_get", "Read task state and current transfer progress", "DownloadTask"),
+    Endpoint("POST", "/v1/downloads/{task_id}/cancel", "download_cancel", "Persist a cancellation request; a published file keeps its success", "DownloadTask"),
+    Endpoint("GET", "/v1/downloads/{task_id}/file", "download_file", "Download the owned file of a succeeded task; byte ranges are unsupported", "DownloadFile", binary=True),
 )
 
 
@@ -227,6 +240,10 @@ def resolve(method, path):
     matches = [(route, match) for route, match in matches if match]
     if not matches:
         raise RequestError(404, "not_found", "The API route does not exist.")
+    # A literal route such as /downloads/resume takes precedence over {task_id},
+    # even when the caller uses a method that the literal route does not support.
+    specificity = min(len(route.parameters) for route, _ in matches)
+    matches = [(route, match) for route, match in matches if len(route.parameters) == specificity]
     for route, match in matches:
         if route.method == method:
             fields = {name: PATH_FIELDS[name] for name in route.parameters}
@@ -261,7 +278,7 @@ def schemas():
         "Health": object_schema({"status": {"const": "ok"}, "api_version": {"const": "v1"}, "upstream_status": {"const": "not_checked"}}),
         "Capabilities": object_schema({"api_version": {"const": "v1"}, "authentication": {"const": "bearer"},
             "client_access": {"const": "serialized"}, "operations": {"type": "array", "items": text},
-            "unavailable": {"type": "array", "items": text}}),
+            "unavailable": {"type": "array", "items": text}, "downloads_enabled": {"type": "boolean"}}),
         "OpenAPI": {"type": "object", "description": "OpenAPI 3.1 document describing this server."},
         "Book": object_schema(book), "Books": books,
         "BookDetails": object_schema({**book, **{name: text for name in ("description", "cover_url", "identifier", "isbn10", "isbn13", "publisher", "edition", "pages")}, "categories": {"type": "array", "items": text}}),
@@ -283,14 +300,44 @@ def schemas():
             "tags": {"type": "array", "items": text}, "adds_to_favorites": {"type": "boolean", "description": "True for add, false for remove. This is an operation side effect, not a complete favorite-state snapshot."}}),
         "BooklistDeletion": object_schema({"booklist_id": text, "deleted": {"const": True}}),
         "BooklistBookUpdate": object_schema({"booklist_id": text, "action": {"type": "string", "enum": ["add", "remove"]}, "book_id": {"type": ["string", "null"]}, "entry_id": {"type": ["string", "null"]}}),
+        "TransferProgress": object_schema({"bytes_received": {"type": "integer", "minimum": 0}, "total_bytes": count,
+            "elapsed_seconds": {"type": "number", "minimum": 0},
+            "bytes_per_second": {"type": ["number", "null"], "minimum": 0},
+            "eta_seconds": {"type": ["number", "null"], "minimum": 0},
+            "fraction": {"type": ["number", "null"], "minimum": 0, "maximum": 1}}),
+        "DownloadTask": object_schema({"id": PATH_FIELDS["task_id"].schema(), "reference": {"type": "string", "pattern": "^[0-9]{1,20}:[A-Za-z0-9]{1,128}$"},
+            "state": {"type": "string", "enum": list(TASK_STATES)}, "created_at": {"type": "number", "minimum": 0},
+            "updated_at": {"type": "number", "minimum": 0}, "progress": {"anyOf": [_ref("TransferProgress"), {"type": "null"}]},
+            "cancel_requested": {"type": "boolean"}, "error_code": {"type": ["string", "null"], "enum": [*TASK_ERROR_CODES, None]},
+            "file_available": {"type": "boolean"}, "error_message": {"type": ["string", "null"]},
+            "outcome": {"type": "string", "enum": ["not_started", "completed", "unknown"]}}),
+        "TaskPage": object_schema({"tasks": {"type": "array", "items": _ref("DownloadTask"), "maxItems": 1000},
+            "total": {"type": "integer", "minimum": 0}, "limit": {"type": "integer", "minimum": 1, "maximum": 1000},
+            "offset": {"type": "integer", "minimum": 0},
+            "paused": {"type": "boolean", "description": "Pending downloads remain paused after a quota or rate limit until an explicit resume."}}),
+        "DownloadResume": object_schema({"resumed": {"type": "integer", "minimum": 0}}),
+        "DownloadFile": {"type": "string", "format": "binary", "description": "The task's complete pinned file; never a local path or an arbitrary file."},
     }
 
 
 def openapi_document():
     paths = {}
     for route in ENDPOINTS:
+        content = ({media: {"schema": _ref(route.response)} for media in
+                    ("application/octet-stream", "application/pdf", "application/epub+zip", "image/vnd.djvu")}
+                   if route.binary else {"application/json": {"schema": _ref(route.response)}})
         operation = {"operationId": route.operation, "summary": route.summary,
-                     "responses": {str(route.status): {"description": "Success", "content": {"application/json": {"schema": _ref(route.response)}}}}}
+                     "responses": {str(route.status): {"description": "Success", "content": content}}}
+        if route.operation.startswith("download_"):
+            operation["description"] = "Available only when the server is explicitly configured with a download directory and verified account; otherwise returns 503 downloads_unavailable. No local paths are accepted or returned."
+        if route.operation == "download_submit":
+            operation["description"] += " The reference accepts ID:HASH or a book URL on the configured domain. Reusing an idempotency key with the same normalized reference returns the existing task; a different reference returns 409. Acceptance does not guarantee a completed download, and failed or interrupted tasks are never automatically retried."
+        if route.binary:
+            operation["responses"][str(route.status)]["headers"] = {
+                "Content-Disposition": {"schema": {"type": "string"}, "description": "Attachment with an encoded basename."},
+                "Content-Length": {"schema": {"type": "integer", "minimum": 0}},
+                "Accept-Ranges": {"schema": {"type": "string", "const": "none"}}}
+            operation["description"] += " Range and If-Range are rejected. A changed file is refused before headers; a later read failure terminates the stream, so clients must verify Content-Length."
         parameters = [{"name": name, "in": "path", "required": True, "schema": PATH_FIELDS[name].schema()} for name in route.parameters]
         for name, spec in route.query.items():
             parameter = {"name": name, "in": "query", "required": spec.required, "schema": spec.schema()}
@@ -304,10 +351,10 @@ def openapi_document():
             if route.partial:
                 schema["minProperties"] = 1
             operation["requestBody"] = {"required": True, "content": {"application/json": {"schema": schema}}}
-        for status in (400, 401, 403, 404, 405, 408, 409, 413, 414, 415, 417, 422, 424, 429, 431, 500, 502, 503, 504):
+        for status in (400, 401, 403, 404, 405, 408, 409, 410, 413, 414, 415, 417, 422, 424, 429, 431, 500, 502, 503, 504):
             operation["responses"][str(status)] = {"description": "Structured error; retry mutations only after checking their outcome.", "content": {"application/json": {"schema": _ref("Error")}}}
         paths.setdefault(route.path, {})[route.method.lower()] = operation
     return {"openapi": "3.1.0", "info": {"title": "Z-Library HTTP API", "version": "1.0.0",
-        "description": "Local API with a caller-owned Client. Calls are serialized. No HTTP login or downloads. Bearer authentication is required, including health and this document. Browser origins are disabled unless explicitly allowed."},
+        "description": "Local API with a caller-owned Client. Upstream calls are serialized; local task polling and cancellation remain independent. Downloads require an explicitly configured directory and verified account. No HTTP login. Bearer authentication is required, including files, health and this document. Browser origins are disabled unless explicitly allowed."},
         "servers": [{"url": "/"}], "security": [{"bearerAuth": []}], "paths": paths,
         "components": {"securitySchemes": {"bearerAuth": {"type": "http", "scheme": "bearer"}}, "schemas": schemas()}}
