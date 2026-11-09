@@ -18,8 +18,14 @@ def _identity(info):
     return info.st_dev, info.st_ino
 
 
+def _path_signature(info):
+    # Windows lstat and fstat can give ctime different meanings. Compare it
+    # only between descriptor snapshots, including the persisted receipt.
+    return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns
+
+
 def _signature(info):
-    return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns
+    return (*_path_signature(info), info.st_ctime_ns)
 
 
 def _directory(path):
@@ -138,12 +144,13 @@ class TaskFiles:
                 raise
             opened = os.fstat(stream.fileno())
             _regular(opened)
-            if _signature(before) != _signature(opened) or (expected is not None and _signature(opened) != expected):
+            if (_path_signature(before) != _path_signature(opened)
+                    or (expected is not None and _signature(opened) != expected)):
                 raise JobFileError(_FILE_ERROR)
             self._check_owned(owned)
             final = path.lstat()
             _regular(final)
-            if _signature(final) != _signature(opened):
+            if _path_signature(final) != _path_signature(opened):
                 raise JobFileError(_FILE_ERROR)
             yield stream, opened
         except (OSError, ValueError):

@@ -3,10 +3,17 @@
 import os
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 from zlib_connector.jobs.files import TaskFiles
 from zlib_connector.jobs.models import JobFileError
+
+
+def changed_stat(info, **changes):
+    values = {name: getattr(info, name) for name in dir(info) if name.startswith("st_")}
+    return SimpleNamespace(**(values | changes))
 
 
 class TaskFileTests(unittest.TestCase):
@@ -32,6 +39,34 @@ class TaskFileTests(unittest.TestCase):
             self.assertTrue(file.stream.read().startswith(b"1.7"))
         with self.assertRaises(JobFileError):
             file.stream.read(1)
+
+    def test_path_and_descriptor_ctime_can_differ_for_the_same_file(self):
+        original_lstat = Path.lstat
+
+        def path_stat(path):
+            info = original_lstat(path)
+            # Windows lstat reports creation time; recent fstat reports change time.
+            return changed_stat(info, st_ctime_ns=info.st_ctime_ns + 1) if path == self.path else info
+
+        with patch.object(Path, "lstat", autospec=True, side_effect=path_stat):
+            receipt = self.files.capture(self.owned, self.path)
+            with self.path.open("rb") as source:
+                self.assertEqual(receipt.ctime_ns, os.fstat(source.fileno()).st_ctime_ns)
+            with self.files.open(self.task_id, receipt) as file:
+                self.assertEqual(file.stream.read(), b"%PDF-1.7\nSynthetic task artifact")
+
+    def test_descriptor_ctime_change_alone_is_detected_before_next_chunk(self):
+        receipt = self.files.capture(self.owned, self.path)
+        original_fstat = os.fstat
+
+        def changed_descriptor(descriptor):
+            return changed_stat(original_fstat(descriptor), st_ctime_ns=receipt.ctime_ns + 1)
+
+        with self.files.open(self.task_id, receipt) as file:
+            self.assertEqual(file.stream.read(5), b"%PDF-")
+            with patch("zlib_connector.jobs.files.os.fstat", side_effect=changed_descriptor):
+                with self.assertRaises(JobFileError):
+                    file.stream.read(5)
 
     def test_outside_results_and_existing_task_directories_are_rejected(self):
         outside = self.folder / "outside.pdf"

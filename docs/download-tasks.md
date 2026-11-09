@@ -99,6 +99,12 @@ attachment. The server reopens only the recorded file, checking its identity,
 size and timestamps. It rejects replacement files, links and paths outside the
 task directory. File responses use bounded chunks and a 30-second send deadline.
 
+These checks use filesystem metadata, not a content checksum. They do not prove
+that a file was never altered by someone able to restore its metadata. On Windows,
+Python versions can report different device identifiers and timestamp meanings.
+After a runtime upgrade, an existing receipt may no longer match: retrieval then
+returns 410, retaining the original file on disk without downloading it again.
+
 `zlib-cli jobs file TASK_ID --output .` makes a validated copy with a new filename
 without overwriting existing files or consuming Z-Library quota again. The CLI
 uses a loopback HTTP address and an existing private token file. It follows no
