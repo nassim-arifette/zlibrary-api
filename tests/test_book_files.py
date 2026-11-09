@@ -122,7 +122,7 @@ class BookPublicationTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
-        self.folder = Path(self.directory.name)
+        self.folder = Path(self.directory.name).resolve()
 
     def test_temp_exists_before_writer_and_published_file_is_complete(self):
         calls = []

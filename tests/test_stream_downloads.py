@@ -35,7 +35,7 @@ class StreamDownloadTests(unittest.TestCase):
         client, transport = make_client(DETAILS, FILE, CONTENT)
         snapshots = []
         with tempfile.TemporaryDirectory() as directory, client:
-            folder = Path(directory)
+            folder = Path(directory).resolve()
 
             def progress(value):
                 self.assertIsInstance(value, TransferProgress)
@@ -66,7 +66,7 @@ class StreamDownloadTests(unittest.TestCase):
                 client.login("synthetic", "synthetic")
                 path = client.download(BOOK, directory, progress=snapshots.append)
                 self.assertEqual(path.read_bytes(), CONTENT)
-                self.assertEqual(list(Path(directory).iterdir()), [path])
+                self.assertEqual(list(Path(directory).resolve().iterdir()), [path])
             self.assertEqual(snapshots[-1].bytes_received, len(CONTENT))
             self.assertEqual(len(transport.calls), 3 if html else 4)
             if not html:
@@ -171,7 +171,7 @@ class StreamDownloadCliTests(unittest.TestCase):
                 self.assertEqual(set(result), {"path"})
                 path = Path(result["path"])
                 self.assertEqual(path.read_bytes(), CONTENT)
-                self.assertEqual(list(Path(directory).iterdir()), [path])
+                self.assertEqual(list(Path(directory).resolve().iterdir()), [path])
             if flag == "--progress":
                 self.assertIn("Received", stderr.getvalue())
                 self.assertIn("100%", stderr.getvalue())
