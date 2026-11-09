@@ -12,6 +12,16 @@ from test_eapi import BOOK, ORIGIN, QueueTransport
 
 
 class BookTests(unittest.TestCase):
+    def test_remote_reference_types_cannot_be_coerced_into_valid_references(self):
+        invalid = [{**BOOK, "hash": value} for value in (None, True, False, 123, [], {})]
+        invalid.extend({**BOOK, "id": value} for value in (None, True, 1.5, [], {}))
+        for row in invalid:
+            for method, payload in (("search", {"books": [row]}), ("get_formats", {"books": [row]})):
+                transport = QueueTransport([{"success": 1, **payload}])
+                with self.subTest(row=row, method=method), Client(ORIGIN, transport=transport) as client, \
+                        self.assertRaises(FormatChangedError):
+                    getattr(client, method)("123:ab12")
+
     def test_details_include_clean_metadata_and_checksum_valid_isbns(self):
         row = {**BOOK, "description": "<p>A <b>description</b></p><script>hidden</script>\x1b",
                "identifier": "ISBN 0-306-40615-2; ISBN 978-0-306-40615-7", "publisher": "Publisher",

@@ -3,7 +3,7 @@ import json
 import unittest
 from unittest.mock import patch
 
-from zlib_connector import Client, FormatChangedError, MutationUncertainError
+from zlib_connector import AuthenticationError, Client, DownloadError, FormatChangedError, MutationUncertainError, RateLimitError
 from zlib_connector.cli import main
 from zlib_connector.credentials import Credentials
 from test_eapi import BOOK, ORIGIN, QueueTransport
@@ -11,6 +11,36 @@ from test_transport import Connection, Reply
 
 
 class FavoriteTests(unittest.TestCase):
+    def test_unreadable_mutation_responses_are_uncertain_without_a_retry(self):
+        replies = [Reply(headers=[("Content-Length", str(4 * 1024 * 1024 + 1))]),
+                   Reply(data=b'<html><title>Just a moment...</title>cf-chl challenge</html>')]
+        for reply in replies:
+            login = Reply(data=b'{"response":{}}', headers=[
+                ("Set-Cookie", "remix_userkey=synthetic; Secure; Path=/"),
+                ("Set-Cookie", "remix_userid=123; Secure; Path=/"),
+            ])
+            connections = [Connection(login), Connection(Reply(data=b'{"success":1,"user":{}}')),
+                           Connection(reply)]
+            with self.subTest(reply=reply), patch("zlib_connector.transport.public_addresses", return_value=["8.8.8.8"]), \
+                    patch("http.client.HTTPSConnection", side_effect=connections) as constructor:
+                with Client(ORIGIN) as client:
+                    client.login("synthetic", "synthetic")
+                    with self.assertRaises(MutationUncertainError):
+                        client.set_favorite("123:ab12", saved=True)
+            self.assertEqual(constructor.call_count, 3)
+            self.assertTrue(all(connection.closed for connection in connections))
+
+    def test_explicit_mutation_refusals_keep_their_error_type(self):
+        for reason, expected in (("login required", AuthenticationError), ("limit", RateLimitError),
+                                 ("operation refused", DownloadError)):
+            transport = QueueTransport([{"response": {}}, {"success": 1, "user": {}},
+                                        {"success": 0, "error": reason}])
+            with self.subTest(reason=reason), Client(ORIGIN, transport=transport) as client:
+                client.login("synthetic", "synthetic")
+                with self.assertRaises(expected):
+                    client.set_favorite("123:ab12", saved=True)
+            self.assertEqual(len(transport.calls), 3)
+
     def test_add_and_remove_are_explicit_account_updates(self):
         transport = QueueTransport([{"response": {}}, {"success": 1, "user": {}},
                                     {"success": 1}, {"success": 1}])

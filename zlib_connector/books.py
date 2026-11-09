@@ -71,7 +71,10 @@ def _text(value) -> str:
 
 def _reference(row: dict) -> BookReference:
     try:
-        return BookReference(str(row.get("id", "")), str(row.get("hash", "")))
+        identifier, book_hash = row.get("id"), row.get("hash")
+        if type(identifier) not in (int, str) or not isinstance(book_hash, str):
+            raise ValueError
+        return BookReference(str(identifier), book_hash)
     except ValueError:
         raise FormatChangedError("The API returned an invalid book reference.") from None
 

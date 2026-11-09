@@ -6,7 +6,7 @@ from pathlib import Path
 from urllib.parse import urlencode, urljoin
 
 from .client import Book, Client as HtmlClient, SUPPORTED_FORMATS, parse_html, same_origin
-from .errors import AuthenticationError, DownloadError, FormatChangedError, MutationUncertainError, NetworkError, RateLimitError
+from .errors import AuthenticationError, ChallengeRequired, DownloadError, FormatChangedError, MutationUncertainError, NetworkError, RateLimitError
 from .search import SearchFilters, SearchPage, parse_page, validate_search
 from .books import BookDetails, BookFormat, BookReference, parse_books, parse_details, parse_format
 from .account import AccountProfile, DownloadQuota, parse_profile
@@ -17,16 +17,24 @@ from .pagination import BookPage, validate_page
 class Client(HtmlClient):
     def _json(self, path: str, *, form=None, mutation=False) -> dict:
         options = {"follow_redirects": False} if mutation else {}
-        response = self._transport.request(urljoin(self.domain, path), form=form, **options)
-        if not same_origin(response.url, self.domain):
-            raise FormatChangedError("The API moved to another domain. Select that domain explicitly.")
         try:
-            value = json.loads(response.body)
-        except (ValueError, UnicodeError):
-            parse_html(response.body, self.domain)
-            raise FormatChangedError("The API returned HTML instead of JSON. Check the selected domain.") from None
-        if not isinstance(value, dict) or "success" not in value:
-            raise FormatChangedError("The API response format changed.")
+            response = self._transport.request(urljoin(self.domain, path), form=form, **options)
+            if not same_origin(response.url, self.domain):
+                raise FormatChangedError("The API moved to another domain. Select that domain explicitly.")
+            try:
+                value = json.loads(response.body)
+            except (ValueError, UnicodeError):
+                parse_html(response.body, self.domain)
+                raise FormatChangedError("The API returned HTML instead of JSON. Check the selected domain.") from None
+            if not isinstance(value, dict) or "success" not in value:
+                raise FormatChangedError("The API response format changed.")
+        except (NetworkError, DownloadError, FormatChangedError, ChallengeRequired):
+            if mutation:
+                raise MutationUncertainError(
+                    "The account update could not be confirmed. Check its current state before trying again."
+                ) from None
+            raise
+        # Only a readable API response can confirm success or explicitly refuse a mutation.
         if value["success"] != 1:
             # Classify known errors, but never echo remote bodies or account fields.
             error = str(value.get("error", "")).lower()
@@ -133,12 +141,7 @@ class Client(HtmlClient):
         if type(saved) is not bool:
             raise ValueError("Favorite state must be a boolean.")
         action = "save" if saved else "unsave"
-        try:
-            self._json(f"eapi/user/book/{reference.book_id}/{action}", mutation=True)
-        except (NetworkError, FormatChangedError):
-            raise MutationUncertainError(
-                "The favorite update could not be confirmed. Check your favorites before trying again."
-            ) from None
+        self._json(f"eapi/user/book/{reference.book_id}/{action}", mutation=True)
         return FavoriteUpdate(reference.book_id, saved)
 
     def get_history(self, *, page: int = 1, limit: int = 20, order: str | None = None) -> BookPage:

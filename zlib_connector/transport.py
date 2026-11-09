@@ -74,12 +74,23 @@ class Transport:
             connection = http.client.HTTPSConnection(parsed.hostname, timeout=remaining, context=ssl.create_default_context())
             # TLS still checks the original hostname; the socket uses validated DNS answers.
             def connect(_address, timeout=remaining, source_address=None):
+                last_error = OSError("No reachable public address")
                 for address in addresses:
+                    remaining_connect = deadline - time.monotonic()
+                    if remaining_connect <= 0:
+                        raise TimeoutError
                     try:
-                        return socket.create_connection((address, 443), timeout, source_address)
-                    except OSError:
-                        continue
-                raise OSError("No reachable public address")
+                        sock = socket.create_connection((address, 443), min(timeout, remaining_connect), source_address)
+                    except OSError as error:
+                        last_error = error
+                    else:
+                        remaining_tls = deadline - time.monotonic()
+                        if remaining_tls <= 0:
+                            sock.close()
+                            raise TimeoutError
+                        sock.settimeout(remaining_tls)
+                        return sock
+                raise last_error
             connection._create_connection = connect
             payload = urlencode(form, doseq=True).encode() if form is not None else None
             request = Request(url, data=payload, headers={"User-Agent": "ZlibConnector/0.1", "Accept": "*/*", "Accept-Encoding": "identity"})
