@@ -246,6 +246,10 @@ The package has no runtime dependencies. Run the tests from the project folder:
 python -m unittest discover -s tests -q
 ```
 
+GitHub Actions runs the offline tests on Windows and Linux with Python 3.11 and
+3.14. It also installs the package and checks the installed CLI outside the source
+folder. These checks do not use a Z-Library account or contact its servers.
+
 The [technical reference](docs/reference.md) covers protocol behavior, file
 validation and recorded compatibility checks. Z-Library's endpoints and domains
 can change, so a successful check is specific to its date and network.
