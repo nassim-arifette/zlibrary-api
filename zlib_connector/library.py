@@ -42,6 +42,15 @@ class LibraryOverview:
                 "booklists": [item.to_dict() for item in self.booklists]}
 
 
+@dataclass(frozen=True)
+class FavoriteUpdate:
+    book_id: str
+    is_favorite: bool
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
 def parse_booklist(row: dict) -> Booklist:
     if not isinstance(row, dict):
         raise FormatChangedError("The API returned an invalid booklist.")

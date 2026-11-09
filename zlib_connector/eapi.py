@@ -1,21 +1,23 @@
 """JSON API used by the mobile client; HTML login remains a separate handshake."""
 import json
 import re
+from dataclasses import replace
 from pathlib import Path
 from urllib.parse import urlencode, urljoin
 
 from .client import Book, Client as HtmlClient, SUPPORTED_FORMATS, parse_html, same_origin
-from .errors import AuthenticationError, DownloadError, FormatChangedError, RateLimitError
+from .errors import AuthenticationError, DownloadError, FormatChangedError, MutationUncertainError, NetworkError, RateLimitError
 from .search import SearchFilters, SearchPage, parse_page, validate_search
 from .books import BookDetails, BookFormat, BookReference, parse_book, parse_details, parse_format
 from .account import AccountProfile, DownloadQuota, parse_profile
-from .library import FAVORITE_ORDERS, HISTORY_ORDERS, Booklist, LibraryOverview, booklist_id, parse_booklist
+from .library import FAVORITE_ORDERS, HISTORY_ORDERS, Booklist, FavoriteUpdate, LibraryOverview, booklist_id, parse_booklist
 from .pagination import BookPage, validate_page
 
 
 class Client(HtmlClient):
-    def _json(self, path: str, *, form=None) -> dict:
-        response = self._transport.request(urljoin(self.domain, path), form=form)
+    def _json(self, path: str, *, form=None, mutation=False) -> dict:
+        options = {"follow_redirects": False} if mutation else {}
+        response = self._transport.request(urljoin(self.domain, path), form=form, **options)
         if not same_origin(response.url, self.domain):
             raise FormatChangedError("The API moved to another domain. Select that domain explicitly.")
         try:
@@ -131,7 +133,23 @@ class Client(HtmlClient):
         return self._collection_page(f"eapi/user/book/{collection}?{urlencode(params)}", page=page, limit=limit)
 
     def get_favorites(self, *, page: int = 1, limit: int = 20, order: str | None = "saved_date") -> BookPage:
-        return self._account_books("saved", page=page, limit=limit, order=order)
+        result = self._account_books("saved", page=page, limit=limit, order=order)
+        return replace(result, books=tuple(replace(book, is_favorite=True) for book in result.books))
+
+    def set_favorite(self, reference: str, *, saved: bool) -> FavoriteUpdate:
+        """Explicit account update; never follow redirects or retry an uncertain response."""
+        self._require_login()
+        reference = BookReference.parse(reference, self.domain)
+        if type(saved) is not bool:
+            raise ValueError("Favorite state must be a boolean.")
+        action = "save" if saved else "unsave"
+        try:
+            self._json(f"eapi/user/book/{reference.book_id}/{action}", mutation=True)
+        except (NetworkError, FormatChangedError):
+            raise MutationUncertainError(
+                "The favorite update could not be confirmed. Check your favorites before trying again."
+            ) from None
+        return FavoriteUpdate(reference.book_id, saved)
 
     def get_history(self, *, page: int = 1, limit: int = 20, order: str | None = None) -> BookPage:
         """Read account download history; the service may ignore requested ordering."""

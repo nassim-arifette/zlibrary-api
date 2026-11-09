@@ -33,6 +33,7 @@ class Book:
     size: str = ""
     book_id: str = ""
     book_hash: str = ""
+    is_favorite: bool | None = None
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)

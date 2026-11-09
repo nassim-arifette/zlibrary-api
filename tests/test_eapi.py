@@ -22,7 +22,7 @@ class QueueTransport:
     def close(self):
         self.authenticated = False
 
-    def request(self, url, *, form=None, download=False):
+    def request(self, url, *, form=None, download=False, follow_redirects=True):
         self.calls.append((url, form, download))
         value = self.responses.pop(0)
         if url.endswith('/rpc.php'):

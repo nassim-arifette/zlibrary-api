@@ -83,6 +83,13 @@ def parse_book(row: dict, domain: str) -> Book:
     title = _text(row.get("title"))
     if not title:
         raise FormatChangedError("The API returned a book without a title.")
+    saved = row.get("_isUserSavedBook")
+    if type(saved) in (bool, int, str) and saved in (True, 1, "1", "true"):
+        saved = True
+    elif type(saved) in (bool, int, str) and saved in (False, 0, "0", "false"):
+        saved = False
+    elif saved is not None:
+        raise FormatChangedError("The API returned an invalid saved-book flag.")
     canonical = urljoin(domain, f"book/{reference.book_id}/{reference.book_hash}")
     href = row.get("href")
     try:
@@ -95,7 +102,7 @@ def parse_book(row: dict, domain: str) -> Book:
     return Book(title=title, authors=_text(row.get("author")), extension=_text(row.get("extension")).lower(),
                 url=href, year=_text(row.get("year")), language=_text(row.get("language")),
                 size=_text(row.get("filesizeString") or row.get("filesize")),
-                book_id=reference.book_id, book_hash=reference.book_hash)
+                book_id=reference.book_id, book_hash=reference.book_hash, is_favorite=saved)
 
 
 class _Description(HTMLParser):

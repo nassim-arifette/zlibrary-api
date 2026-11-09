@@ -9,8 +9,9 @@ is to make your Z-Library account and collections available through a CLI, a TUI
 and an HTTP API, with the same behavior across them.
 
 **Available today:** a Python library, CLI and interactive shell, including
-browsing favorites, download history and your booklists. Editing collections,
-the TUI and the HTTP API are planned. This is an unofficial client.
+browsing and updating favorites, reading download history and opening your
+booklists. Editing booklists, the TUI and the HTTP API are planned.
+This is an unofficial client.
 
 ## Get started
 
@@ -114,6 +115,18 @@ Replace `BOOKLIST_ID` with that number. You can inspect or download any listed
 book using its `ID:HASH` reference. Add `--json` to any of these commands for
 scripts. Reading a list does not modify its books or visibility.
 
+To save a book for later or remove it from your favorites:
+
+```sh
+zlib-cli favorites add "ID:HASH"
+zlib-cli favorites remove "ID:HASH"
+```
+
+Replace `ID:HASH` with the book's reference. The CLI asks before changing the
+account. Scripts must pass `--yes` explicitly and can add `--json` for the result.
+Saved books carry a `[saved]` marker when their state is known. If a connection
+problem leaves an update unconfirmed, check your favorites before trying again.
+
 ## Keep a session open
 
 Use the interactive shell to search and download several books after one login:
@@ -194,8 +207,6 @@ For more context on diagnostics and errors, see the [reference](docs/reference.m
 
 The next steps focus on your library and reading lists:
 
-- **Favorites:** add and remove saved books, and see their saved status while
-  browsing.
 - **Booklists:** create and edit lists, and add or remove books where the service
   supports those operations. Browsing existing lists is available now.
 - **History and discovery:** track local files alongside account history and

@@ -61,7 +61,8 @@ class Transport:
         values = {cookie.name: cookie.value for cookie in self.cookies}
         return bool(values.get("remix_userkey")) and values.get("remix_userid", "0") not in ("", "0")
 
-    def request(self, url: str, *, form: dict[str, str | list[str]] | None = None, download: bool = False) -> Response:
+    def request(self, url: str, *, form: dict[str, str | list[str]] | None = None,
+                download: bool = False, follow_redirects: bool = True) -> Response:
         deadline = time.monotonic() + self.timeout
         for _ in range(6):
             validate_url(url)
@@ -99,6 +100,8 @@ class Transport:
                 response = connection.getresponse()
                 self.cookies.extract_cookies(response, request)
                 if response.status in (301, 302, 303, 307, 308):
+                    if not follow_redirects:
+                        raise NetworkError("The account update returned a redirect; it was not followed.", reason="redirect")
                     location = response.getheader("Location")
                     if not location:
                         raise NetworkError("The site returned an invalid redirect.")

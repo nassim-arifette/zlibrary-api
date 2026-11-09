@@ -55,6 +55,13 @@ def parser() -> argparse.ArgumentParser:
         command.add_argument("--limit", type=int, default=20)
         command.add_argument("--order", choices=orders, default="saved_date" if name == "favorites" else None)
         command.add_argument("--json", action="store_true")
+        if name == "favorites":
+            actions = command.add_subparsers(dest="favorite_action")
+            for action in ("add", "remove"):
+                change = actions.add_parser(action, help=f"{action} a book in your account favorites")
+                change.add_argument("reference", help="ID:HASH or a book URL on the selected domain")
+                change.add_argument("--yes", action="store_true", help="apply the account change without prompting")
+                change.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
     library = commands.add_parser("library", help="overview of favorites, download history and booklists")
     library.add_argument("--limit", type=int, default=5, help="preview size per book collection")
     library.add_argument("--json", action="store_true")
@@ -91,7 +98,8 @@ def show_books(books, *, file=None):
         print("No books found.", file=file)
     for index, book in enumerate(books, 1):
         reference = f" · {book.book_id}:{book.book_hash}" if book.book_id and book.book_hash else ""
-        print(f"{index:2}. {book.title}\n    {book.authors} · {book.year} · {book.language} · {book.extension.upper() or '?'} · {book.size}{reference}", file=file)
+        saved = " [saved]" if book.is_favorite else ""
+        print(f"{index:2}. {book.title}{saved}\n    {book.authors} · {book.year} · {book.language} · {book.extension.upper() or '?'} · {book.size}{reference}", file=file)
 
 def search_filters(args) -> SearchFilters:
     validate_search(args.query, args.page, args.limit)
@@ -142,7 +150,7 @@ def show_book_command(client: Client, args):
                 print(f"{item.book_id}:{item.book_hash} · {item.extension.upper()} · {item.size}{support}")
 
 
-def show_library_command(client: Client, args):
+def run_library_command(client: Client, args):
     def show_page(page):
         show_books(page.books)
         total = page.total_items if page.total_items is not None else "unknown"
@@ -155,6 +163,15 @@ def show_library_command(client: Client, args):
             count = item.book_count if item.book_count is not None else "unknown"
             visibility = "unknown" if item.is_public is None else "public" if item.is_public else "private"
             print(f"{item.booklist_id} · {item.title} · {count} books · {visibility}")
+
+    if args.command == "favorites" and args.favorite_action in ("add", "remove"):
+        result = client.set_favorite(args.reference, saved=args.favorite_action == "add")
+        if args.json:
+            print(json.dumps(result.to_dict()))
+        else:
+            state = "Added to" if result.is_favorite else "Removed from"
+            print(f"{state} favorites: {result.book_id}")
+        return
 
     if args.command == "library":
         overview = client.get_library(limit=args.limit)
@@ -255,6 +272,13 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         filters = None
         reference = None
+        favorite_change = args.command == "favorites" and args.favorite_action in ("add", "remove")
+        if favorite_change:
+            reference = args.reference
+            if args.page != 1 or args.limit != 20 or args.order != "saved_date":
+                raise ValueError("List pagination and ordering cannot be used with a favorite update.")
+            if not args.yes and not sys.stdin.isatty():
+                raise ValueError("Use --yes to apply a favorite update in non-interactive mode.")
         if args.command in ("favorites", "history", "library"):
             validate_page(getattr(args, "page", 1), args.limit)
         if args.command == "booklists" and args.booklist_action == "show":
@@ -283,6 +307,12 @@ def main(argv: list[str] | None = None) -> int:
         with Client(args.domain or credentials.domain, timeout=args.timeout) as client:
             if reference is not None:
                 BookReference.parse(reference, client.domain)
+            if favorite_change and not args.yes:
+                action = "Add to" if args.favorite_action == "add" else "Remove from"
+                identifier = BookReference.parse(reference, client.domain).book_id
+                if prompt(f"{action} favorites on {client.domain}: book {identifier}? [y/N] ").lower() not in ("y", "yes"):
+                    print("Cancelled.", file=sys.stderr)
+                    return 130
             email = credentials.email or prompt("Email: ")
             password = credentials.password or getpass.getpass("Password: ", stream=sys.stderr)
             del credentials
@@ -312,7 +342,7 @@ def main(argv: list[str] | None = None) -> int:
                         print(f"{name.capitalize()}: {value if value is not None else 'unknown'}")
                 return 0
             if args.command in LIBRARY_COMMANDS:
-                show_library_command(client, args)
+                run_library_command(client, args)
                 return 0
             if reference is not None:
                 selected = reference

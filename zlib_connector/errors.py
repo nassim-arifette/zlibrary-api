@@ -21,3 +21,7 @@ class NetworkError(ConnectorError):
 
 class DownloadError(ConnectorError):
     pass
+
+
+class MutationUncertainError(ConnectorError):
+    """The account may have changed; read its current state before trying again."""

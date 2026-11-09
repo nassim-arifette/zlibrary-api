@@ -160,8 +160,8 @@ Raw owner fields and booklist-entry annotations are not exposed.
 The CLI commands are `library`, `favorites`, `history`, `booklists [list]` and
 `booklists show BOOKLIST_ID`. All support `--json`. Favorites/history and booklist
 contents return `{books, pagination}`; the booklist index returns an array.
-These operations read account data only. They do not inventory local files,
-change favorites or edit a list. The overview does not assume that a specific
+These browsing operations read account data only. They do not inventory local
+files or edit a list. The overview does not assume that a specific
 booklist called "My Library" exists on the account.
 
 Booklists currently use `GET /papi/booklist/current-user/0` and a read-only
@@ -170,6 +170,23 @@ shapes were checked against the configured account on 2026-11-09. The
 [KOReader implementation](https://github.com/ZlibraryKO/zlibrary.koplugin/blob/main/zlibrary/api.lua)
 provided the endpoint reference. No account content or credentials were recorded
 in verification output.
+
+`set_favorite("ID:HASH", saved=True)` adds a favorite; `saved=False` removes it.
+It requires login and returns `FavoriteUpdate(book_id, is_favorite)` after the
+server reports success. The CLI exposes `favorites add` and `favorites remove`,
+with an interactive confirmation or explicit `--yes` for scripts. Invalid input
+and declined confirmations do not send an account update.
+
+Although the upstream save/unsave endpoints use GET, the client treats them as
+mutations: it does not follow redirects or retry them. A network failure or
+unreadable response raises `MutationUncertainError`; query favorites before
+retrying. These mutation paths are covered with synthetic responses, including
+redirects and cancellation, rather than changes to the configured account.
+The endpoint reference is the [existing Python wrapper](https://github.com/bipinkrish/Zlibrary-API/blob/main/Zlibrary.py).
+
+Book records now include `is_favorite`: true/false when the service supplies a
+recognized saved flag, otherwise null. Books read from the favorites collection
+are marked true. A missing flag is not interpreted as an unsaved book.
 
 ## Protocol and safeguards
 
