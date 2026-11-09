@@ -40,6 +40,31 @@ class Connection:
         self.closed = True
 
 class TransportTests(unittest.TestCase):
+    def test_explicit_methods_preserve_empty_and_json_bodies(self):
+        for method, body in (("PUT", None), ("DELETE", None), ("PUT", {"tags": ["science"]}),
+                             ("DELETE", {"tags": ["science"]})):
+            connection = Connection(Reply())
+            with self.subTest(method=method, body=body), patch('zlib_connector.transport.public_addresses', return_value=['8.8.8.8']), \
+                    patch('http.client.HTTPSConnection', return_value=connection):
+                Transport().request('https://books.example/papi/my-library/book/123', method=method, json_body=body,
+                                    follow_redirects=False)
+            self.assertEqual(connection.calls[0][0], method)
+            self.assertEqual(connection.calls[0][2] is None, body is None)
+
+    def test_empty_delete_cannot_follow_a_foreign_origin_or_changed_flow(self):
+        for status, target in ((307, 'https://other.example/delete'), (303, 'https://books.example/again')):
+            connection = Connection(Reply(status, headers=[('Location', target)]))
+            with self.subTest(status=status), patch('zlib_connector.transport.public_addresses', return_value=['8.8.8.8']), \
+                    patch('http.client.HTTPSConnection', return_value=connection) as constructor, self.assertRaises(NetworkError):
+                Transport().request('https://books.example/papi/my-library/book/123', method='DELETE')
+            constructor.assert_called_once()
+
+    def test_invalid_methods_and_get_bodies_fail_before_network(self):
+        for options in ({'method': 'TRACE'}, {'method': 'get'}, {'method': ''}, {'method': 'GET', 'json_body': {}}):
+            with self.subTest(options=options), patch('zlib_connector.transport.public_addresses') as resolve, self.assertRaises(ValueError):
+                Transport().request('https://books.example/', **options)
+            resolve.assert_not_called()
+
     def invoke(self, replies, *, form=None, transport=None, download=False):
         connections = [Connection(reply) for reply in replies]
         with patch('zlib_connector.transport.public_addresses', return_value=['8.8.8.8']), patch('http.client.HTTPSConnection', side_effect=connections):

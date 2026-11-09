@@ -13,6 +13,11 @@ def booklist_options(args) -> dict:
 
 
 def account_confirmation(args, domain: str) -> str:
+    if args.command == "tags":
+        identifier = BookReference.parse(args.reference, domain).book_id
+        effect = " This also adds the book to favorites." if args.tag_action == "add" else ""
+        return (f"{args.tag_action.capitalize()} tags {json.dumps(args.tags, ensure_ascii=False)} "
+                f"for book {identifier} on {domain}?{effect} [y/N] ")
     if args.command == "favorites":
         action = "Add to" if args.favorite_action == "add" else "Remove from"
         identifier = BookReference.parse(args.reference, domain).book_id
@@ -112,6 +117,24 @@ def run_catalog_command(client: Client, args, filters: SearchFilters | None):
 
 
 def run_library_command(client: Client, args):
+    if args.command == "tags":
+        if args.tag_action == "saved-ids":
+            identifiers = client.get_saved_book_ids()
+            print(json.dumps({"book_ids": list(identifiers)}) if args.json
+                  else "\n".join(identifiers) or "No saved book IDs found.")
+        elif args.tag_action in ("add", "remove"):
+            update = client.add_book_tags if args.tag_action == "add" else client.remove_book_tags
+            result = update(args.reference, args.tags)
+            message = f"Tags updated for book {result.book_id}."
+            if result.adds_to_favorites:
+                message += " The book is also saved to favorites."
+            print(json.dumps(result.to_dict(), ensure_ascii=False) if args.json else message)
+        else:
+            result = client.get_library_tags()
+            print(json.dumps(result.to_dict(), ensure_ascii=False) if args.json
+                  else "\n".join(result.names) or "No My Library tags found.")
+        return
+
     def show_page(page):
         show_books(page.books)
         total = page.total_items if page.total_items is not None else "unknown"

@@ -184,6 +184,44 @@ retrying. These mutation paths are covered with synthetic responses, including
 redirects and cancellation, rather than changes to the configured account.
 The endpoint reference is the [existing Python wrapper](https://github.com/bipinkrish/Zlibrary-API/blob/main/Zlibrary.py).
 
+### Native My Library tags
+
+| Python method | CLI command | Result |
+| --- | --- | --- |
+| `get_library_tags()` | `tags [list]` | `LibraryTags`, serialized as `{tags: [...]}`. |
+| `get_saved_book_ids()` | `tags saved-ids` | Tuple of IDs; CLI JSON is `{book_ids: [...]}`. |
+| `add_book_tags(reference, tags)` | `tags add ID:HASH LABEL [LABEL ...]` | `BookTagUpdate`. Also adds the book to favorites. |
+| `remove_book_tags(reference, tags)` | `tags remove ID:HASH LABEL [LABEL ...]` | `BookTagUpdate`. Keeps the favorite. |
+
+All four require login. Mutations require a nonempty list or tuple of nonblank
+labels. New labels are limited to 30 UTF-16 code units, matching the website's
+input limit; removing an existing longer label is allowed. Control characters
+are rejected. Exact duplicates are removed, but case,
+spaces and Unicode spelling are preserved. The service enforces the combined
+tag limit for the book. The catalog exposes names only; its opaque values are
+not interpreted as counts or colors. An empty upstream `[]` catalog is valid.
+
+`BookTagUpdate.to_dict()` contains `book_id`, `action`, `tags`, and
+`adds_to_favorites`. It acknowledges the submitted change after server success;
+it is not a snapshot of all tags on the book. Unreadable mutation responses raise
+`MutationUncertainError`, with no redirect or automatic retry. The CLI confirms
+before login, or requires `--yes` in scripts. Adding tags explicitly mentions
+its effect on favorites.
+
+The site's [bookmark script](https://z-lib.by/resources/js/user-bookmarks.js)
+and [tag component](https://z-lib.by/components/z-tags.js), inspected on
+2026-11-09, use `GET /papi/my-library/tags/`,
+`GET /papi/my-library/saved-book-ids`, and `PUT`/`DELETE`
+`/papi/my-library/tags/{book_id}` with a JSON `{tags: [...]}` body.
+Account reads confirmed the empty-catalog and saved-ID response shapes.
+Writes are covered by synthetic tests; no real tags were changed.
+
+The native book view uses a server-rendered profile page with search, tag and
+page filters. Its authenticated HTML could not be verified on the tested domain
+because of a browser challenge. Full native browsing and per-book tag reads
+remain unavailable; neither saved IDs nor the collection overview substitute
+for that view.
+
 ### Books in booklists
 
 `get_booklist_books()` returns `BooklistBook` records, which extend `Book` with

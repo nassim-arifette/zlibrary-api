@@ -19,13 +19,15 @@ class QueueTransport:
         self.calls = []
         self.authenticated = False
         self.json_bodies = []
+        self.methods = []
 
     def close(self):
         self.authenticated = False
 
-    def request(self, url, *, form=None, json_body=None, download=False, follow_redirects=True):
+    def request(self, url, *, form=None, json_body=None, method=None, download=False, follow_redirects=True):
         self.calls.append((url, form, download))
         self.json_bodies.append(json_body)
+        self.methods.append(method or ("POST" if form is not None or json_body is not None else "GET"))
         value = self.responses.pop(0)
         if url.endswith('/rpc.php'):
             self.authenticated = True

@@ -16,13 +16,16 @@ from .booklists import (
     booklist_entry_id, booklist_id, parse_booklist, parse_booklist_books, validate_booklist_changes,
 )
 from .pagination import BookPage, validate_page
+from .my_library import BookTagUpdate, LibraryTags, parse_library_tags, parse_saved_book_ids, validate_tags
 
 
 class Client(HtmlClient):
-    def _json(self, path: str, *, form=None, json_body=None, mutation=False) -> dict:
+    def _json(self, path: str, *, form=None, json_body=None, method=None, mutation=False) -> dict:
         options = {"follow_redirects": False} if mutation else {}
         if json_body is not None:
             options["json_body"] = json_body
+        if method is not None:
+            options["method"] = method
         try:
             response = self._transport.request(urljoin(self.domain, path), form=form, **options)
             if not same_origin(response.url, self.domain):
@@ -146,6 +149,32 @@ class Client(HtmlClient):
     def get_history(self, *, page: int = 1, limit: int = 20, order: str | None = None) -> BookPage:
         """Read account download history; the service may ignore requested ordering."""
         return self._account_books("downloaded", page=page, limit=limit, order=order)
+
+    def get_library_tags(self) -> LibraryTags:
+        """Read the native My Library tag catalog, without guessing tag counts."""
+        self._require_login()
+        return parse_library_tags(self._json("papi/my-library/tags/"))
+
+    def get_saved_book_ids(self) -> tuple[str, ...]:
+        """Read saved identifiers; these are not a full native My Library page."""
+        self._require_login()
+        return parse_saved_book_ids(self._json("papi/my-library/saved-book-ids"))
+
+    def _update_book_tags(self, reference: str, tags, *, action: str) -> BookTagUpdate:
+        self._require_login()
+        reference = BookReference.parse(reference, self.domain)
+        tags = validate_tags(tags, for_removal=action == "remove")
+        self._json(f"papi/my-library/tags/{reference.book_id}",
+                   method="PUT" if action == "add" else "DELETE", json_body={"tags": list(tags)}, mutation=True)
+        return BookTagUpdate(reference.book_id, action, tags)
+
+    def add_book_tags(self, reference: str, tags: tuple[str, ...] | list[str]) -> BookTagUpdate:
+        """Add native tags. The site also adds the book to favorites."""
+        return self._update_book_tags(reference, tags, action="add")
+
+    def remove_book_tags(self, reference: str, tags: tuple[str, ...] | list[str]) -> BookTagUpdate:
+        """Remove only the supplied tags; this does not remove the favorite."""
+        return self._update_book_tags(reference, tags, action="remove")
 
     def get_booklists(self) -> list[Booklist]:
         return [parse_booklist(row) for row in self._booklist_records()]
