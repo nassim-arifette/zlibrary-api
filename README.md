@@ -12,6 +12,7 @@ python -m zlib_connector check
 python -m zlib_connector auth-test
 python -m zlib_connector shell
 python -m zlib_connector quota --json
+python -m zlib_connector --timeout 5 doctor --json
 ```
 
 The configured default is `https://z-lib.by/`, verified with a real account on
@@ -81,6 +82,28 @@ guessed from the number of returned books. Totals describe the upstream result s
 
 `check` exercises a real public API search, not merely the site's homepage or
 domain listing. `auth-test` validates both login cookies and the account profile.
+
+`doctor` probes the known candidate domains with isolated anonymous clients and
+up to four concurrent requests (`--workers 1` through `8`). Supply explicit HTTPS
+origins after `doctor` to limit the list, or use global `--domain` to probe one.
+Global `--timeout` applies per request. `domains [--json]` lists candidates without
+network access; their presence does not imply current availability.
+
+```powershell
+python -m zlib_connector --timeout 5 doctor https://z-lib.by/ https://z-lib.sk/ --json
+```
+
+The report includes measured elapsed time, UTC check time, real-search success,
+and typed failures (DNS, TLS/certificate, timeout, challenge, redirect, rate limit,
+authentication requirement or incompatible response). A successful probe confirms
+only anonymous search from this network at that time. The fastest successful
+candidate is suggested; configuration and credentials are never changed or sent.
+No success returns exit status 1; at least one success returns 0.
+
+Python callers can use `diagnose_domains([...], timeout=5, workers=4)` to obtain
+a `DomainReport`, its `recommended_domain` and `to_dict()` result. A successful
+probe's final origin matches the tested origin; failed redirects are reported,
+not silently followed with form data. Probes do not authenticate or download files.
 
 Interactive mode logs in once and keeps the session until exit:
 
@@ -217,3 +240,7 @@ validated file-download flow; that check did not consume an account download.
 An authorized account-profile check on 2026-11-09 confirmed populated quota
 counters and consistent remaining-download calculation. Verification output
 contained only success flags; no credentials or raw profile fields were recorded.
+
+An anonymous `doctor` run on 2026-11-09 confirmed public search on `z-lib.by` and
+classified `z-lib.sk` as a browser challenge. These observations are time- and
+network-specific; rerun diagnostics before choosing a domain.

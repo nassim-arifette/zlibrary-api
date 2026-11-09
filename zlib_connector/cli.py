@@ -13,6 +13,7 @@ from .credentials import load_credentials
 from .errors import ConnectorError
 from .search import SEARCH_ORDERS, SearchFilters, validate_search
 from .books import BookReference
+from .diagnostics import KNOWN_DOMAINS, diagnose_domains
 
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(prog="zlib-cli", description="Independent Z-Library search/download client. Sessions remain in memory.")
@@ -47,6 +48,11 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("auth-test", help="test login using local credentials, then discard the session")
     commands.add_parser("shell", help="interactive session: log in once, search and download repeatedly")
     commands.add_parser("check", help="check public HTTPS access without credentials")
+    doctor = commands.add_parser("doctor", help="diagnose real anonymous search on known or specified domains")
+    doctor.add_argument("domains", nargs="*", help="HTTPS origins; defaults to --domain or the known candidates")
+    doctor.add_argument("--workers", type=int, default=4, help="concurrent isolated probes, 1–8 (default: 4)")
+    doctor.add_argument("--json", action="store_true")
+    commands.add_parser("domains", help="list known candidates without probing them").add_argument("--json", action="store_true")
     return result
 
 def prompt(label: str) -> str:
@@ -160,6 +166,20 @@ def shell(client: Client):
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     try:
+        if args.command == "domains":
+            print(json.dumps(list(KNOWN_DOMAINS)) if args.json else "\n".join(KNOWN_DOMAINS))
+            return 0
+        if args.command == "doctor":
+            domains = args.domains or ([args.domain] if args.domain else None)
+            report = diagnose_domains(domains, timeout=args.timeout, workers=args.workers)
+            if args.json:
+                print(json.dumps(report.to_dict()))
+            else:
+                for result in report.results:
+                    state = "ok" if result.search_ok else result.error_code
+                    print(f"{result.domain}  {state}  {result.elapsed_ms} ms  {result.message}")
+                print(f"Suggested domain: {report.recommended_domain or 'none'}")
+            return 0 if report.recommended_domain else 1
         if args.command == "check":
             domain = args.domain or "https://z-lib.by/"
             with Client(domain, timeout=args.timeout) as client:
