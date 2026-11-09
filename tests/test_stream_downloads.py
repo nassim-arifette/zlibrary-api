@@ -13,6 +13,7 @@ from zlib_connector.cli import main
 from zlib_connector.credentials import Credentials
 from zlib_connector.transfer import CancellationToken, TransferCancelled, TransferProgress
 from test_eapi import ORIGIN, QueueTransport
+from session_fixture import isolated_sessions
 
 
 BOOK = Book("Example", "Author", "pdf", ORIGIN + "book/123/ab12", book_id="123", book_hash="ab12")
@@ -156,6 +157,7 @@ class StreamDownloadTests(unittest.TestCase):
         self.assertEqual(snapshots[-1].fraction, 1.0)
 
 
+@isolated_sessions
 class StreamDownloadCliTests(unittest.TestCase):
     def test_progress_stays_on_stderr_and_no_progress_preserves_path_only_json(self):
         for flag in ("--progress", "--no-progress"):

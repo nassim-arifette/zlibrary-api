@@ -6,7 +6,8 @@ For the local HTTP server, see the [HTTP API guide](http-api.md).
 
 ## CLI behavior
 
-Global flags (`--domain`, `--credentials`, `--timeout`) go before the command.
+Global flags (`--domain`, `--credentials`, `--timeout`, `--session-file`,
+`--no-session`) go before the command.
 Repeat `--format` and `--language` to select several formats/languages. Search and
 query-based download also accept `--year-from`, `--year-to` and `--order`:
 
@@ -65,6 +66,80 @@ Optionally install the console entry point with `python -m pip install -e .` and
 use `zlib-cli` with the same arguments. Installation is not needed for `python -m`.
 
 ## Python API
+
+### Persistent sessions
+
+```python
+from zlib_connector import Client, SessionStore
+
+store = SessionStore()  # Default local application state directory.
+with Client("https://z-lib.by/") as client:
+    client.login(email, password, session_store=store)
+
+with Client("https://z-lib.by/") as client:
+    status = client.restore_session(store)  # Confirms the account remotely.
+    history = client.get_history()
+
+print(store.read().status())  # Safe local metadata; no cookies or account IDs.
+store.clear()  # Forget local cookies; does not revoke a remote session.
+```
+
+`login(..., session_store=store)` persists only after the domain confirms the
+session. Without that argument, login remains in memory. `restore_session()`
+requires the same canonical HTTPS origin and unexpired authentication cookies;
+it confirms the account before returning `verified: true`. Errors clear the
+client's imported cookies but leave the stored file unchanged. A network failure
+is not treated as expiry, and no automatic password login follows a failed
+restore. `close()` never writes the store or saves rotated cookies.
+
+The store contains only the selected origin, save time, authentication cookies
+and their path/expiry restrictions, plus a format version and generation. There
+is no password, email or raw profile. Restored cookies are secure and limited to
+the exact host. Browser cookie import and cross-domain session migration are not
+implemented. Low-level session objects contain secrets and must not be logged
+or serialized into an application response; use `snapshot.status()` instead.
+
+The default path is `state_directory()/session.json`; `SessionStore(path)` uses
+an explicit file in an existing parent directory. A missing store can be read
+without creating files. Writes use a private temporary file, fsync and atomic
+replacement under a bounded interprocess lock. Existing unsafe permissions,
+links, malformed or oversized files are rejected rather than repaired silently.
+Cookie JSON is protected by Windows ACLs or POSIX permissions, not encryption.
+`SessionStore(..., lock_timeout=5)` allows up to five seconds to acquire the
+writer lock and, on Windows, up to five more if an open reader temporarily blocks
+replacement. A failed publication preserves the previous file and removes its
+own temporary file. These waits never repeat a network authentication request.
+
+Each write changes a generation. A login captures that generation before the
+network request and saves only if it is unchanged. `clear()` retains an empty
+record with a new generation, so a login already in flight cannot recreate the
+forgotten session. The stable lock file is not removed. A running HTTP server
+or shell keeps its own in-memory session after local logout.
+
+`SessionError`, `SessionConflictError` and `SessionLockTimeoutError` are
+`ConnectorError` subclasses. A conflicting login or logout fails explicitly;
+the caller decides whether to repeat it. No network request runs under the file
+lock. Clients remain synchronous and are not safe for simultaneous calls.
+
+CLI commands `login`, `logout`, and `status [--verify]` accept `--json`. Local
+status reports `empty`, `stored` or `expired`, with `verified: false`; stored
+cookies alone do not prove remote validity. Verification requires a usable
+saved session and adds `authenticated: true` on success. The CLI keeps its normal
+exit codes: 0 for successful local inspection, 1 for a failed verification or
+operation. `--no-session` cannot be combined with these session-management
+commands. A supplied `--domain` must match before `status` or `logout` can act on
+an existing session.
+
+Domain selection for account commands is: explicit `--domain`, the domain in an
+explicit `--credentials` file, saved session origin, then the default credentials
+domain. Explicit `login` still reads credentials for fresh authentication.
+Ordinary commands reuse the saved session; if none exists, they retain their
+previous in-memory login behavior. `auth-test` ignores persistent sessions.
+Anonymous commands and domain diagnostics do not access session or credential
+files. The HTTP launcher shares this selection logic and binds its listener
+before any upstream session confirmation; it exposes no HTTP login endpoint.
+
+### Search and download
 
 ```python
 from zlib_connector import Client, ConnectorError

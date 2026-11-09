@@ -9,6 +9,7 @@ from zlib_connector.credentials import Credentials
 from zlib_connector.my_library import BookTagUpdate, LibraryTags
 from test_eapi import ORIGIN, QueueTransport
 from test_transport import Connection, Reply
+from session_fixture import isolated_sessions
 
 
 def transport_for(*responses):
@@ -135,6 +136,7 @@ class MyLibraryTests(unittest.TestCase):
             self.assertNotIn("synthetic-private-value", str(caught.exception))
 
 
+@isolated_sessions
 class MyLibraryCliTests(unittest.TestCase):
     def test_existing_long_label_can_be_removed_without_changing_its_identity(self):
         label = "A legacy tag longer than thirty characters"

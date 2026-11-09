@@ -11,6 +11,7 @@ from zlib_connector.transport import Response, public_addresses, validate_url
 from zlib_connector.cli import main
 from zlib_connector.credentials import Credentials
 from streaming_fixture import MemoryDownloadTransport
+from session_fixture import isolated_sessions
 
 ORIGIN = "https://books.example/"
 CARDS = b'''<div id="searchResultBox"><div class="book-item"><z-bookcard href="/book/12/abc" extension="PDF" year="2026" language="French" filesize="2 MB"><img src="ignored"><div slot="title">A &amp; <b>B</b></div><div slot="author"><a>Author</a></div></z-bookcard></div><z-bookcard href="https://other.example/book/1" extension="pdf"><div slot="title">Foreign</div></z-bookcard><z-bookcard href="/book/3/x" extension="exe"><div slot="title">Unsupported</div></z-bookcard></div>'''
@@ -36,6 +37,7 @@ class FakeTransport(MemoryDownloadTransport):
             raise value
         return value if isinstance(value, Response) else Response(value, url)
 
+@isolated_sessions
 class ClientTests(unittest.TestCase):
     def setUp(self):
         self.transport = FakeTransport()

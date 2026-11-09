@@ -8,6 +8,7 @@ from zlib_connector import AuthenticationError, BookPage, Client, FormatChangedE
 from zlib_connector.cli import main
 from zlib_connector.credentials import Credentials
 from test_eapi import BOOK, ORIGIN, QueueTransport
+from session_fixture import isolated_sessions
 
 
 LIST = {"id": 42, "title": "Reading list", "books_count": 1, "public": 0,
@@ -130,6 +131,7 @@ class LibraryTests(unittest.TestCase):
                     getattr(client, method)(*args)
 
 
+@isolated_sessions
 class LibraryCliTests(unittest.TestCase):
     def test_cli_account_views_return_serializable_results(self):
         for command, payload in ((["favorites", "--json"], {"success": 1, "books": [BOOK]}),

@@ -6,7 +6,9 @@ from unittest.mock import patch
 
 from zlib_connector.credentials import Credentials, load_credentials
 from zlib_connector.cli import main
+from session_fixture import isolated_sessions
 
+@isolated_sessions
 class CredentialTests(unittest.TestCase):
     def test_loads_utf8_bom_and_preserves_password_spaces(self):
         with tempfile.TemporaryDirectory() as directory:

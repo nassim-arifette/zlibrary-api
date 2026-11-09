@@ -3,7 +3,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 import http.client
 from http.cookies import SimpleCookie
-from http.cookiejar import CookieJar, DefaultCookiePolicy
+from http.cookiejar import Cookie, CookieJar, DefaultCookiePolicy
 import ipaddress
 import io
 import json
@@ -16,12 +16,26 @@ from urllib.parse import urlencode, urljoin, urlsplit
 from urllib.request import Request
 from typing import BinaryIO, Callable
 
-from .errors import ChallengeRequired, DownloadError, NetworkError, RateLimitError
+from .errors import AuthenticationError, ChallengeRequired, DownloadError, NetworkError, RateLimitError
 from .transfer import CancellationToken, TransferProgress
+from .session_data import AUTH_COOKIE_NAMES, SavedSession, SessionCookie, canonical_origin
 
 HTML_LIMIT = 4 * 1024 * 1024
 BOOK_LIMIT = 256 * 1024 * 1024
 CHUNK_SIZE = 64 * 1024
+
+
+def _cookie_jar():
+    return CookieJar(policy=DefaultCookiePolicy(strict_ns_domain=DefaultCookiePolicy.DomainStrict))
+
+
+def _profile_cookie(cookie, origin):
+    """Check the normal HTTPS cookie scope without changing the source jar."""
+    probe = _cookie_jar()
+    probe.set_cookie(cookie)
+    request = Request(urljoin(origin, "eapi/user/profile"))
+    probe.add_cookie_header(request)
+    return request.get_header("Cookie") is not None
 
 def validate_url(url: str) -> None:
     try:
@@ -203,7 +217,7 @@ class Transport:
             raise ValueError("Timeout must be 0–300 seconds and download limit at most 256 MiB.")
         self.timeout = timeout
         self.max_download_bytes = max_download_bytes
-        self.cookies = CookieJar(policy=DefaultCookiePolicy(strict_ns_domain=DefaultCookiePolicy.DomainStrict))
+        self.cookies = _cookie_jar()
 
     def close(self) -> None:
         self.cookies.clear()
@@ -212,6 +226,55 @@ class Transport:
     def authenticated(self) -> bool:
         values = {cookie.name: cookie.value for cookie in self.cookies}
         return bool(values.get("remix_userkey")) and values.get("remix_userid", "0") not in ("", "0")
+
+    def export_session(self, origin: str) -> SavedSession:
+        """Export only unambiguous authentication cookies scoped to this origin.
+
+        Matching uses the actual profile URL, preserving cookie paths and expiry.
+        Other-site cookies, expired cookies and browser/challenge cookies are not
+        persisted. The legacy aggregate authenticated flag is not used here.
+        """
+        origin = canonical_origin(origin)
+        now = time.time()
+        selected = {}
+        for cookie in self.cookies:
+            if cookie.name not in AUTH_COOKIE_NAMES or cookie.is_expired(now) or not _profile_cookie(cookie, origin):
+                continue
+            if cookie.name in selected:
+                raise ValueError("The account session has ambiguous authentication cookies.")
+            selected[cookie.name] = SessionCookie(cookie.name, cookie.value, path=cookie.path, expires=cookie.expires)
+        if set(selected) != set(AUTH_COOKIE_NAMES):
+            raise AuthenticationError("The selected domain has no complete, unexpired account session.")
+        return SavedSession(origin, tuple(selected[name] for name in AUTH_COOKIE_NAMES), saved_at=int(now))
+
+    def restore_session(self, session: SavedSession, *, origin: str) -> None:
+        """Replace memory cookies with a validated, exact-origin saved session.
+
+        Restored cookies are always HTTPS-only and host-only. This does not mark
+        a Client authenticated: the caller must still verify its account profile.
+        An invalid restore clears memory and never changes the session file.
+        """
+        self.close()
+        if not isinstance(session, SavedSession):
+            raise ValueError("Restore requires a validated saved session.")
+        origin = canonical_origin(origin)
+        if session.origin != origin:
+            raise ValueError("The saved session belongs to a different domain. Select its exact domain or log in again.")
+        if session.expired:
+            raise AuthenticationError("The saved account session has expired. Log in again.")
+        hostname = urlsplit(origin).hostname
+        restored = _cookie_jar()
+        for record in session.cookies:
+            cookie = Cookie(version=0, name=record.name, value=record.value,
+                port=None, port_specified=False, domain=hostname,
+                domain_specified=False, domain_initial_dot=False, path=record.path,
+                path_specified=True, secure=True, expires=record.expires,
+                discard=record.expires is None, comment=None, comment_url=None,
+                rest={"HttpOnly": None}, rfc2109=False)
+            if not _profile_cookie(cookie, origin):
+                raise ValueError("The saved cookies are not scoped to the account profile endpoint.")
+            restored.set_cookie(cookie)
+        self.cookies = restored
 
     def request(self, url: str, *, form: dict[str, str | list[str]] | None = None,
                 json_body: dict | None = None, method: str | None = None,
@@ -297,7 +360,7 @@ class Transport:
                 if parsed.path.startswith("/eapi/"):
                     scoped_cookies = SimpleCookie()
                     scoped_cookies.load(request.get_header("Cookie", ""))
-                    for name in ("remix_userid", "remix_userkey"):
+                    for name in AUTH_COOKIE_NAMES:
                         if name in scoped_cookies:
                             request.add_header(name.replace("_", "-"), scoped_cookies[name].value)
                 path = parsed.path or "/"

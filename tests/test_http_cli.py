@@ -5,12 +5,16 @@ from contextlib import redirect_stderr, redirect_stdout
 import io
 from pathlib import Path
 import tempfile
+import time
 import unittest
 from unittest.mock import Mock, patch
 
 from zlib_connector.credentials import Credentials
 from zlib_connector.errors import AuthenticationError
 from zlib_connector.http_cli import add_serve_parser, run_server
+from zlib_connector.session_data import SavedSession, SessionCookie
+from zlib_connector.sessions import SessionStore
+from session_fixture import isolated_sessions
 
 
 def options(*values):
@@ -18,15 +22,20 @@ def options(*values):
     parser.add_argument("--domain")
     parser.add_argument("--credentials", type=Path)
     parser.add_argument("--timeout", type=float, default=30)
+    sessions = parser.add_mutually_exclusive_group()
+    sessions.add_argument("--session-file", type=Path)
+    sessions.add_argument("--no-session", action="store_true")
     add_serve_parser(parser.add_subparsers(dest="command", required=True))
     return parser.parse_args(values)
 
 
 class FakeClient:
-    def __init__(self, events, *, login_error=None):
+    def __init__(self, events, *, login_error=None, restore_error=None):
         self.events = events
         self.login_error = login_error
+        self.restore_error = restore_error
         self.logins = []
+        self.restores = []
 
     def __enter__(self):
         self.events.append("client_enter")
@@ -40,6 +49,12 @@ class FakeClient:
         self.logins.append((email, password))
         if self.login_error:
             raise self.login_error
+
+    def restore_session(self, store):
+        self.events.append("restore")
+        self.restores.append(store)
+        if self.restore_error:
+            raise self.restore_error
 
 
 class FakeServer:
@@ -65,7 +80,79 @@ class FakeServer:
         raise AssertionError("Never call shutdown from the serve_forever thread.")
 
 
+@isolated_sessions
 class HttpCliTests(unittest.TestCase):
+    def save_session(self):
+        session = SavedSession("https://saved.example/", (
+            SessionCookie("remix_userid", "123"), SessionCookie("remix_userkey", "synthetic-secret")),
+            saved_at=int(time.time()))
+        return SessionStore().save(session, expected_generation=None)
+
+    def test_saved_session_verification_happens_after_bind_without_credentials_or_prompts(self):
+        snapshot = self.save_session()
+        events = []
+        client = FakeClient(events)
+        factory = Mock(return_value=client)
+        loader, prompt, password = (Mock(side_effect=AssertionError) for _ in range(3))
+
+        def bind(*args, **kwargs):
+            events.append("bind")
+            return FakeServer(events)
+
+        args = options("serve")
+        with redirect_stderr(io.StringIO()):
+            run_server(args, client_factory=factory, credentials_loader=loader, prompt=prompt,
+                       password_prompt=password, server_factory=bind)
+        factory.assert_called_once_with("https://saved.example/", timeout=30)
+        self.assertEqual(events, ["client_enter", "bind", "server_enter", "restore", "serve", "server_close", "client_close"])
+        self.assertEqual(client.logins, [])
+        self.assertEqual(client.restores[0].read(), snapshot)
+        for callback in (loader, prompt, password):
+            callback.assert_not_called()
+
+    def test_bind_failure_does_not_verify_or_log_in_even_when_a_session_exists(self):
+        self.save_session()
+        events = []
+        client = FakeClient(events)
+        loader = Mock(side_effect=AssertionError)
+        with self.assertRaises(OSError):
+            run_server(options("serve"), client_factory=lambda *args, **kwargs: client, credentials_loader=loader,
+                       server_factory=Mock(side_effect=OSError("address already in use")))
+        self.assertEqual(events, ["client_enter", "client_close"])
+        self.assertEqual(client.restores, [])
+        self.assertEqual(client.logins, [])
+        loader.assert_not_called()
+
+    def test_rejected_saved_session_closes_server_without_fallback_login_or_serve(self):
+        self.save_session()
+        events = []
+        client = FakeClient(events, restore_error=AuthenticationError("Synthetic expired session"))
+        loader, prompt, password = (Mock(side_effect=AssertionError) for _ in range(3))
+        with self.assertRaises(AuthenticationError):
+            run_server(options("serve"), client_factory=lambda *args, **kwargs: client, credentials_loader=loader,
+                       prompt=prompt, password_prompt=password,
+                       server_factory=lambda *args, **kwargs: FakeServer(events))
+        self.assertEqual(events, ["client_enter", "server_enter", "restore", "server_close", "client_close"])
+        self.assertEqual(client.logins, [])
+        for callback in (loader, prompt, password):
+            callback.assert_not_called()
+
+    def test_anonymous_and_no_session_launcher_do_not_open_the_session_store(self):
+        for flags in (("serve", "--anonymous"), ("--no-session", "serve")):
+            events = []
+            loader = Mock(return_value=Credentials(email="synthetic", password="synthetic"))
+            with self.subTest(flags=flags), redirect_stderr(io.StringIO()), \
+                    patch("zlib_connector.cli_session.SessionStore", side_effect=AssertionError("Session store was opened")):
+                run_server(options(*flags), client_factory=lambda *args, **kwargs: FakeClient(events),
+                           credentials_loader=loader, server_factory=lambda *args, **kwargs: FakeServer(events))
+            self.assertNotIn("restore", events)
+            if "--anonymous" in flags:
+                loader.assert_not_called()
+                self.assertNotIn("login", events)
+            else:
+                loader.assert_called_once_with(None)
+                self.assertIn("login", events)
+
     def test_parser_defaults_and_explicit_options(self):
         args = options("serve")
         self.assertEqual(("127.0.0.1", 8000, [], False), (args.host, args.port, args.allow_origin, args.anonymous))

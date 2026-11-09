@@ -7,6 +7,7 @@ from zlib_connector import AuthenticationError, Client, FormatChangedError
 from zlib_connector.cli import main
 from zlib_connector.credentials import Credentials
 from test_eapi import ORIGIN, QueueTransport
+from session_fixture import isolated_sessions
 
 
 def signed_in_transport(*users):
@@ -14,6 +15,7 @@ def signed_in_transport(*users):
                            *({"success": 1, "user": user} for user in users)])
 
 
+@isolated_sessions
 class AccountTests(unittest.TestCase):
     def test_profile_projects_only_quota_and_ignores_remote_secrets(self):
         user = {"downloads_limit": "10", "downloads_today": 3, "remix_userkey": "synthetic-secret",

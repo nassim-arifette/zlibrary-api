@@ -18,6 +18,7 @@ from .pagination import BookPage, validate_page
 from .my_library import BookTagUpdate, LibraryTags, parse_library_tags, parse_saved_book_ids, validate_tags
 from .book_files import save_book
 from .transfer import CancellationToken, ProgressCallback
+from .sessions import SessionStore
 
 
 class Client(HtmlClient):
@@ -55,12 +56,47 @@ class Client(HtmlClient):
             raise DownloadError("The API refused this operation.")
         return value
 
-    def login(self, email: str, password: str) -> None:
-        super().login(email, password)
+    def _confirm_authentication(self) -> None:
+        profile = self._json("eapi/user/profile")
+        if not isinstance(profile.get("user"), dict):
+            raise FormatChangedError("The API did not confirm an account for this session.")
+
+    def login(self, email: str, password: str, *, session_store: SessionStore | None = None) -> None:
+        """Log in, optionally publishing a session if its captured revision still matches.
+
+        The store is read before authentication, so a concurrent logout or login
+        prevents this attempt from overwriting the newer local session state.
+        Closing the Client never saves cookies or resurrects a removed session.
+        """
         try:
-            profile = self._json("eapi/user/profile")
-            if not isinstance(profile.get("user"), dict):
-                raise FormatChangedError("Login returned cookies but the API did not confirm an account.")
+            snapshot = session_store.read() if session_store is not None else None
+            super().login(email, password)
+            self._authenticated = False
+            self._confirm_authentication()
+            if session_store is not None:
+                session = self._transport.export_session(self.domain)
+                session_store.save(session, expected_generation=snapshot.generation)
+            self._authenticated = True
+        except BaseException:
+            self.close()
+            raise
+
+    def restore_session(self, store: SessionStore) -> dict:
+        """Restore and verify a stored session, without saving or rotating the file.
+
+        Local absence, expiry or domain mismatch fails before any account request.
+        Every failure clears the loaded in-memory cookies; stored state is left
+        untouched, including after temporary network or verification failures.
+        """
+        self.close()
+        try:
+            snapshot = store.read()
+            if snapshot.session is None:
+                raise AuthenticationError("No saved account session is available. Log in first.")
+            self._transport.restore_session(snapshot.session, origin=self.domain)
+            self._confirm_authentication()
+            self._authenticated = True
+            return {**snapshot.status(), "authenticated": True, "verified": True}
         except BaseException:
             self.close()
             raise

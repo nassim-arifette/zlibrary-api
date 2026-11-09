@@ -15,6 +15,10 @@ credentials.local.toml*
 api-token
 .api-token-*
 
+session.json
+session.json.lock
+.session-*
+
 build/
 
 dist/

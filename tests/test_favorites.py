@@ -8,6 +8,7 @@ from zlib_connector.cli import main
 from zlib_connector.credentials import Credentials
 from test_eapi import BOOK, ORIGIN, QueueTransport
 from test_transport import Connection, Reply
+from session_fixture import isolated_sessions
 
 
 class FavoriteTests(unittest.TestCase):
@@ -112,6 +113,7 @@ class FavoriteTests(unittest.TestCase):
             client.search("Example")
 
 
+@isolated_sessions
 class FavoriteCliTests(unittest.TestCase):
     def test_non_interactive_account_update_requires_explicit_yes(self):
         with patch("sys.stdin", io.StringIO()), patch("sys.stderr", io.StringIO()), \
