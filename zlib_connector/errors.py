@@ -15,7 +15,13 @@ class FormatChangedError(ConnectorError):
     pass
 
 class NetworkError(ConnectorError):
-    pass
+    def __init__(self, message: str, *, reason: str = "network"):
+        super().__init__(message)
+        self.reason = reason
 
 class DownloadError(ConnectorError):
     pass
+
+
+class MutationUncertainError(ConnectorError):
+    """The account may have changed; read its current state before trying again."""

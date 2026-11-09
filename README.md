@@ -1,134 +1,255 @@
 # Zlibrary API
 
-Standalone Python API and CLI for Z-Library. Python 3.11+, no runtime package
-dependencies, no desktop application or web server required.
+An API, CLI and TUI for Z-Library.
 
-## Start
+Search for books, inspect editions, download files and access your favorites,
+booklists and download history.
 
-From this directory:
+**Available today:** a Python library, CLI and interactive shell, including
+browsing and updating favorites, reading download history and opening your
+booklists. Editing booklists, the TUI and the HTTP API are planned.
+This is an unofficial client.
 
-```powershell
-python -m zlib_connector check
-python -m zlib_connector auth-test
-python -m zlib_connector shell
+## Get started
+
+You need **Python 3.11 or later**. From the project folder, install the command:
+
+```sh
+python -m pip install -e .
 ```
 
-The configured default is `https://z-lib.by/`, verified with a real account on
-2026-11-09. `1lib.sk` and `z-lib.sk` returned DiamWall HTTP 513 in the same session.
-`--domain HTTPS_ORIGIN` overrides the selected domain. Credentials are never
-automatically forwarded to another origin or tried against a list of mirrors.
+You can also run it without installing: replace `zlib-cli` in the examples with
+`python -m zlib_connector`.
 
-## Credentials
+### Find a working domain
 
-Authenticated commands read `credentials.local.toml` beside this README. This
-file is ignored by Git. Restrict its permissions to your own account.
-It contains a local plaintext password; do not share or commit it.
-
-```toml
-domain = "https://z-lib.by/"
-email = "your-account@example.com"
-password = ""
+```sh
+zlib-cli --timeout 5 doctor
 ```
 
-To create the local file, run `Copy-Item credentials.example.toml credentials.local.toml`
-only if it does not already exist. Fill in the email and password locally. Missing email/password values are prompted. For
-passwords containing backslashes or double quotes, TOML single-quoted literal
-strings can be used unless the password itself contains a single quote.
-`--credentials PATH` selects another TOML file. Neither credentials nor session
-cookies are printed in errors, logs or JSON results. Session cookies remain in
-memory and are discarded when the client closes.
+`doctor` tries a real search on the known domains and suggests one that responds.
+It reports blocked requests, connection problems and timeouts without signing in.
+The result depends on your network and when you run it.
 
-## Commands
+The examples below use `https://z-lib.by/`. Replace it with a working domain from
+your results. Options such as `--domain`, `--timeout` and `--credentials` go
+**before** the command name.
 
-```powershell
-# Authenticated search; JSON output is suitable for a future application adapter.
-python -m zlib_connector search "title or author" --format epub --json
+### Search for a book
 
-# Download a selected result into an existing directory.
-python -m zlib_connector download "title" --pick 1 --output "C:\Books"
-
-# Public search without loading the credentials file.
-python -m zlib_connector search "Pride and Prejudice" --anonymous --limit 3
-
-# Check an explicitly selected domain, without credentials.
-python -m zlib_connector --domain https://z-lib.by/ check
+```sh
+zlib-cli --domain https://z-lib.by/ search "Pride and Prejudice" --anonymous --format epub --limit 5
 ```
 
-Global flags (`--domain`, `--credentials`, `--timeout`) go before the command.
-`check` exercises a real public API search, not merely the site's homepage or
-domain listing. `auth-test` validates both login cookies and the account profile.
+Search by title, author or ISBN. `--anonymous` lets you browse without loading
+your account details. It uses the domain you pass explicitly, or `z-lib.by` by
+default.
 
-Interactive mode logs in once and keeps the session until exit:
+To narrow the results, choose a language, publication years and a sort order:
+
+```sh
+zlib-cli --domain https://z-lib.by/ search "history" --anonymous --language french --year-from 2000 --order bestmatch
+```
+
+You can repeat `--language` and `--format` to include several values. Use
+`--page 2` for the next page, or add `--json --with-pagination` to include the
+available page counts and navigation in a script.
+
+### Choose and download
+
+```sh
+zlib-cli --domain https://z-lib.by/ download "Pride and Prejudice" --format epub --output .
+```
+
+The command signs in, lists the results and asks which one to download. If you
+haven't saved your credentials, it prompts for your email and password. Password
+input is hidden. Downloads support **PDF, EPUB and DjVu** and require an existing
+destination folder; `.` means the current folder.
+
+For a precise edition, use the `book_id` and `book_hash` from a JSON search result
+as `ID:HASH`. Replace that placeholder in these commands with the actual values:
+
+```sh
+zlib-cli --domain https://z-lib.by/ info "ID:HASH" --anonymous
+zlib-cli --domain https://z-lib.by/ formats "ID:HASH" --anonymous
+zlib-cli --domain https://z-lib.by/ download "ID:HASH" --output .
+```
+
+The details include the description, publisher, edition, pages and valid ISBNs
+when the service supplies them. Alternative formats have their own references.
+A direct download uses the edition you selected without running another search.
+You can also pass its book URL from the selected domain.
+
+### Check your quota
+
+```sh
+zlib-cli --domain https://z-lib.by/ quota
+```
+
+This shows your daily limit, downloads used and downloads remaining. If a counter
+is missing from the response, it appears as `unknown`. Add `--json` for scripts.
+
+## Browse your library
+
+```sh
+zlib-cli library
+zlib-cli favorites --limit 10
+zlib-cli history --page 2
+zlib-cli booklists
+```
+
+`library` gives you an overview with separate previews of your favorites,
+account download history and booklists. The history comes from Z-Library; it
+doesn't mean those files are still on this computer.
+
+To open one of your booklists, use the ID shown next to its name:
+
+```sh
+zlib-cli booklists show BOOKLIST_ID --page 1
+```
+
+Replace `BOOKLIST_ID` with that number. You can inspect or download any listed
+book using its `ID:HASH` reference. Add `--json` to any of these commands for
+scripts. Reading a list does not modify its books or visibility.
+
+To save a book for later or remove it from your favorites:
+
+```sh
+zlib-cli favorites add "ID:HASH"
+zlib-cli favorites remove "ID:HASH"
+```
+
+Replace `ID:HASH` with the book's reference. The CLI asks before changing the
+account. Scripts must pass `--yes` explicitly and can add `--json` for the result.
+Saved books carry a `[saved]` marker when their state is known. If a connection
+problem leaves an update unconfirmed, check your favorites before trying again.
+
+## Find your next book
+
+```sh
+zlib-cli popular --anonymous --limit 10
+zlib-cli similar "ID:HASH" --anonymous
+zlib-cli recommended
+```
+
+`popular` shows the service's popular titles, `similar` starts from a book's
+reference, and `recommended` uses your account's recommendations. Add `--json`
+to use the results in a script. `--limit` controls how many books are shown from
+the returned list; these views do not currently expose pagination or filters.
+
+Some suggestions include only a title, author and reference. Open their details
+with `info` or pass the reference to `download` to resolve the available format.
+The recent-additions endpoint currently returns no book list on the tested
+domain, so that view is not available yet.
+
+## Keep a session open
+
+Use the interactive shell to search and download several books after one login:
+
+```sh
+zlib-cli --domain https://z-lib.by/ shell
+```
 
 ```text
-zlib> search "title or author"
-zlib> download 1 "C:/Books"
+zlib> search "history" --language french --format epub
+zlib> next
+zlib> prev
+zlib> download 1 .
 zlib> quit
 ```
 
-`--json` returns successful search/download results on stdout; prompts and failures
-use stderr. Exit status is 0 on success, 1 on failure, 130 on interruption.
-Optionally install the console entry point with `python -m pip install -e .` and
-use `zlib-cli` with the same arguments. Installation is not needed for `python -m`.
+Result numbers refer to the most recently displayed page. The session ends when
+you leave the shell. Separate CLI commands currently sign in again each time.
 
-## Python API
+## Save your sign-in details locally
+
+To avoid entering them for each command, create `credentials.local.toml` in the
+project folder, next to `pyproject.toml`, or edit it if it already exists:
+
+```toml
+domain = "https://z-lib.by/"
+email = "you@example.com"
+password = ""
+```
+
+Fill in your account details locally. Leave the password empty if you prefer to
+enter it at the prompt. This file stores any saved password as plain text, so
+keep it private; Git ignores it. Credentials and session keys stay out of command
+output. Session cookies are currently kept only in memory.
+
+Use `--credentials PATH` before the command to select another file. `--domain`
+overrides its configured domain. Anonymous commands and domain diagnostics never
+load the credentials file.
+
+## Use it from Python or a script
 
 ```python
-from zlib_connector import Client, ConnectorError
-from zlib_connector.credentials import load_credentials
+from zlib_connector import Client, SearchFilters
 
-credentials = load_credentials()
-try:
-    with Client(credentials.domain, timeout=45) as client:
-        client.login(credentials.email, credentials.password)
-        books = client.search("title or author", extension="epub", page=1, limit=20)
-        if books:
-            saved_path = client.download(books[0], "C:/Books")
-            print(saved_path)
-except ConnectorError as error:
-    print(type(error).__name__, str(error))
+filters = SearchFilters(languages=("english",), formats=("epub",))
+
+with Client("https://z-lib.by/") as client:
+    page = client.search_page("Pride and Prejudice", filters=filters, limit=5)
+    for book in page.books:
+        print(f"{book.book_id}:{book.book_hash}  {book.title}")
 ```
 
-`Client.search()` also works without login where the service allows public search.
-`download()` requires an authenticated session and a `Book` returned by that domain.
-Book records preserve the API's numeric ID and hash independently of website URLs.
-Clients are synchronous and not thread-safe; use a separate client per session.
+The Python library also exposes book details, available formats, downloads,
+account quota and domain diagnostics. See the [reference](docs/reference.md) for
+login examples, return types and errors.
 
-Error types are `AuthenticationError`, `ChallengeRequired`, `RateLimitError`,
-`FormatChangedError`, `NetworkError` and `DownloadError`, all derived from
-`ConnectorError`. Invalid local arguments raise `ValueError`.
+For shell scripts, add `--json` to `search`, `info`, `formats`, `download`,
+`profile`, `quota`, `doctor`, `domains`, `library`, `favorites`, `history` or
+`booklists`, as well as `similar`, `popular` and `recommended`. Search normally returns an array;
+`--with-pagination` adds a `books` and `pagination` object. Results go to standard
+output, while prompts and errors go to standard error.
 
-## Protocol and safeguards
+## If something goes wrong
 
-Login uses the website's `/rpc.php` endpoint, then verifies `/eapi/user/profile`.
-Search uses `/eapi/book/search`; download links come from
-`/eapi/book/{id}/{hash}/file`. These are unofficial mobile endpoints whose contracts
-may change. References: [mobile API documentation](https://github.com/baroxyton/zlibrary-eapi-documentation)
-and [observed response models](https://github.com/heartleo/zlib/blob/main/docs/android-eapi-deep-dive.md).
+| What you see | What to try |
+| --- | --- |
+| A domain is blocked or stops responding | Run `doctor` again and explicitly select a working domain. |
+| Login fails | Check the domain and credentials, then run `auth-test`. Repeated login attempts won't resolve a domain block. |
+| A browser verification challenge | Try another domain reported by `doctor`. This client cannot complete browser challenges. |
+| No downloads remaining | Check `quota` and wait for the account allowance to renew. |
+| A file cannot be saved | Choose an existing writable folder and check available disk space. |
+| Details or formats are missing | Some records have incomplete metadata or no reported alternatives. |
 
-- HTTPS certificate verification, public DNS validation and pinned addresses on
-  every hop. No system proxy configuration is used.
-- Same-origin 307/308 redirects retain form data; cross-origin form replay is
-  rejected. API authentication headers are derived only from cookies applicable
-  to the destination and are not forwarded to download CDNs.
-- HTML pages are not parsed as JSON or saved as books. PDF/EPUB/DjVu signatures
-  are validated before publication; download permissions and formats are checked.
-- Responses are bounded: 4 MiB for API/HTML, 256 MiB per book, with a request
-  deadline. Download data is buffered in memory.
-- Files are written to a temporary file, then atomically published with a random
-  filename suffix without overwriting existing files. The destination must exist
-  and support hard links (NTFS does).
-- Remote metadata is stripped of terminal control characters. Raw server error
-  bodies, credentials and session tokens are never shown.
+Use `zlib-cli --help` or `zlib-cli COMMAND --help` for the available options.
+For more context on diagnostics and errors, see the [reference](docs/reference.md).
 
-## Verification
+## Where the project is going
 
-```powershell
-python -m unittest discover -s tests -v
+The next steps focus on your library and reading lists:
+
+- **Booklists:** create and edit lists, and add or remove books where the service
+  supports those operations. Browsing existing lists is available now.
+- **Local history:** find downloaded files on your computer and detect missing
+  files or duplicates alongside the account history.
+- **Reading queues:** import a list, choose editions, skip duplicates and follow
+  downloads with progress, cancellation and resume where supported.
+- **Persistent sessions:** reuse a login between commands.
+- **TUI and HTTP API:** use Z-Library from an interactive terminal or through
+  documented HTTP endpoints. Both will use the same core as the Python client
+  and CLI.
+- **Uploads:** send a book with its metadata and track its processing, once the
+  service's upload flow and destination visibility have been verified.
+
+These are planned features. The current interactive shell is available now; the
+full TUI and HTTP server are not implemented yet.
+
+## Development
+
+The package has no runtime dependencies. Run the tests from the project folder:
+
+```sh
+python -m unittest discover -s tests -q
 ```
 
-The tests use synthetic accounts and temporary directories. A real, user-authorized
-end-to-end run on 2026-11-09 successfully logged in on `z-lib.by`, confirmed the
-account through the JSON API, found three EPUB results and downloaded a valid
-407,595-byte EPUB of Jane Austen's *Pride & Prejudice* into `downloads/`.
-No credentials or session URLs were recorded in the verification output.
+GitHub Actions runs the offline tests on Windows and Linux with Python 3.11 and
+3.14. It also installs the package and checks the installed CLI outside the source
+folder. These checks do not use a Z-Library account or contact its servers.
+
+The [technical reference](docs/reference.md) covers protocol behavior, file
+validation and recorded compatibility checks. Z-Library's endpoints and domains
+can change, so a successful check is specific to its date and network.
