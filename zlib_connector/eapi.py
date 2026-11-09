@@ -160,7 +160,10 @@ class Client(HtmlClient):
     def _write_booklist(self, path: str, settings: BooklistSettings, identifier: str | None = None) -> Booklist:
         payload = self._json(path, json_body=settings.to_payload(), mutation=True)
         try:
-            result = parse_booklist(payload.get("readlist"))
+            row = payload.get("readlist")
+            result = parse_booklist(row)
+            # Display defaults must never substitute for missing mutation acknowledgments.
+            BooklistSettings.from_record(row, {})
             if ((identifier is not None and result.booklist_id != identifier) or not settings.matches(result)):
                 raise FormatChangedError("The updated booklist could not be confirmed.")
             return result

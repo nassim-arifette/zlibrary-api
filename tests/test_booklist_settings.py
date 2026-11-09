@@ -141,6 +141,19 @@ class BooklistSettingsTests(unittest.TestCase):
                 client.delete_booklist(42)
         self.assertEqual(len(transport.calls), 3)
 
+    def test_display_defaults_cannot_confirm_incomplete_mutation_responses(self):
+        complete = {**SETTINGS, "title": "Untitled booklist", "description": "", "color": 0}
+        incomplete = [{key: value for key, value in complete.items() if key != missing}
+                      for missing in ("title", "description", "public", "color")]
+        incomplete.extend({**complete, "description": value} for value in ({}, [], None, 0))
+        for row in incomplete:
+            transport = transport_for({"success": 1, "readlist": row})
+            with self.subTest(row=row), Client(ORIGIN, transport=transport) as client:
+                client.login("synthetic", "synthetic")
+                with self.assertRaises(MutationUncertainError):
+                    client.create_booklist("Untitled booklist")
+            self.assertEqual(len(transport.calls), 3)
+
 
 class BooklistSettingsCliTests(unittest.TestCase):
     def test_create_edit_and_delete_return_json(self):

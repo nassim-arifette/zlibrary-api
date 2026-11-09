@@ -85,7 +85,7 @@ class BooklistSettings:
                 color=changes["color"] if "color" in changes else _color(row.get("color")),
             )
         except ValueError:
-            raise FormatChangedError("The current booklist settings are incomplete or invalid; no update was sent.") from None
+            raise FormatChangedError("The API returned incomplete or invalid booklist settings.") from None
 
     def to_payload(self) -> dict:
         payload = {"title": self.title, "description": self.description, "color": str(self.color)}
