@@ -8,6 +8,7 @@ import socket
 import threading
 import time
 import unittest
+from unittest.mock import patch
 
 from zlib_connector import (AccountProfile, Book, BookDetails, BookFormat, BookPage, Booklist,
     BooklistBook, BooklistBookUpdate, BooklistDeletion, BooklistNotFoundError, Client,
@@ -324,6 +325,57 @@ class HttpApiTests(unittest.TestCase):
             for raw_body in ('{"title":"a","title":"b"}', '{"title":"a","color":NaN}', '[]', '{broken', '{"title":'):
                 self.assertEqual(400, request(server, "POST", "/v1/booklists", body=raw_body, headers={"Content-Type": "application/json"}, raw=True)[0])
             self.assertEqual(415, request(server, "POST", "/v1/booklists", body="title=x", raw=True)[0])
+            self.assertEqual([], client.calls)
+
+    def test_rejected_request_delivers_json_when_body_arrives_after_headers(self):
+        with running() as (server, client):
+            for _ in range(5):
+                connection = http.client.HTTPConnection(*server.server_address, timeout=3)
+                try:
+                    connection.putrequest("POST", "/v1/booklists")
+                    connection.putheader("Authorization", "Bearer " + TOKEN)
+                    connection.putheader("Content-Length", "7")
+                    connection.endheaders()
+                    # Exercise separate packets: the header refusal must still
+                    # arrive when the body follows it, not reset the connection.
+                    time.sleep(0.005)
+                    connection.send(b"title=x")
+                    response = connection.getresponse()
+                    payload = json.loads(response.read())
+                    self.assertEqual((415, "unsupported_media_type"), (response.status, payload["error"]["code"]))
+                finally:
+                    connection.close()
+            self.assertEqual([], client.calls)
+
+    def test_close_drain_is_bounded_and_never_executes_pipelined_input(self):
+        with running(max_connections=1) as (server, client):
+            closed = threading.Event()
+            original_shutdown = server.shutdown_request
+
+            def observe_close(connection):
+                original_shutdown(connection)
+                closed.set()
+
+            host = f"127.0.0.1:{server.server_address[1]}"
+            first = (f"POST /v1/booklists HTTP/1.1\r\nHost: {host}\r\n"
+                     f"Authorization: Bearer {TOKEN}\r\nContent-Length: 7\r\n\r\n").encode()
+            second_body = b'{"title":"Must not be created"}'
+            second = (f"POST /v1/booklists HTTP/1.1\r\nHost: {host}\r\n"
+                      f"Authorization: Bearer {TOKEN}\r\nContent-Type: application/json\r\n"
+                      f"Content-Length: {len(second_body)}\r\n\r\n").encode() + second_body
+            with patch.object(server, "shutdown_request", observe_close), socket.create_connection(server.server_address, timeout=2) as connection:
+                connection.sendall(first)
+                time.sleep(0.005)
+                connection.sendall(b"title=x" + second)
+                response = b""
+                while chunk := connection.recv(4096):
+                    response += chunk
+                self.assertEqual(1, response.count(b"HTTP/1.1 "))
+                self.assertTrue(response.startswith(b"HTTP/1.1 415 "))
+                self.assertEqual("unsupported_media_type", json.loads(response.split(b"\r\n\r\n", 1)[1])["error"]["code"])
+                # The peer keeps its write side open: cleanup must not wait for
+                # the five-second request timeout or process its next request.
+                self.assertTrue(closed.wait(1), "Response cleanup exceeded its bounded drain.")
             self.assertEqual([], client.calls)
 
     def test_methods_and_unsupported_routes(self):
