@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "zlib-connector"
 version = "0.1.0"
-description = "Independent, session-only Z-Library Python API and CLI"
+description = "Search Z-Library, choose an edition and download books from your terminal or Python."
 requires-python = ">=3.11"
 dependencies = []
 
