@@ -6,7 +6,7 @@ from pathlib import Path
 from urllib.parse import urlencode, urljoin
 
 from .client import Book, Client as HtmlClient, SUPPORTED_FORMATS, parse_html, same_origin
-from .errors import AuthenticationError, ChallengeRequired, DownloadError, FormatChangedError, MutationUncertainError, NetworkError, RateLimitError
+from .errors import AuthenticationError, BooklistNotFoundError, ChallengeRequired, DownloadError, FormatChangedError, MutationUncertainError, NetworkError, RateLimitError
 from .search import SearchFilters, SearchPage, parse_page, validate_search
 from .books import BookDetails, BookFormat, BookReference, parse_books, parse_details, parse_format
 from .account import AccountProfile, DownloadQuota, parse_profile
@@ -218,7 +218,7 @@ class Client(HtmlClient):
             if parse_booklist(row).booklist_id == identifier:
                 settings = BooklistSettings.from_record(row, changes)
                 return self._write_booklist(f"papi/booklist/{identifier}/edit", settings, identifier)
-        raise ValueError("This booklist was not found in the account's editable lists.")
+        raise BooklistNotFoundError("This booklist was not found in the account's editable lists.")
 
     def delete_booklist(self, identifier: str | int) -> BooklistDeletion:
         """Delete a remote list permanently; downloaded files are unaffected."""

@@ -25,3 +25,7 @@ class DownloadError(ConnectorError):
 
 class MutationUncertainError(ConnectorError):
     """The account may have changed; read its current state before trying again."""
+
+
+class BooklistNotFoundError(ValueError):
+    """An editable booklist was not found; no account update was attempted."""
