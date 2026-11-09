@@ -75,6 +75,15 @@ def parser() -> argparse.ArgumentParser:
     show_command.add_argument("booklist_id")
     show_command.add_argument("--page", type=int, default=1)
     show_command.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+    for action in ("add", "remove"):
+        change = actions.add_parser(action, help=f"{action} a book in an existing booklist")
+        change.add_argument("booklist_id")
+        if action == "add":
+            change.add_argument("reference", help="ID:HASH or a book URL on the selected domain")
+        else:
+            change.add_argument("entry_id", help="entry ID from booklists show, distinct from the book ID")
+        change.add_argument("--yes", action="store_true", help="apply the account change without prompting")
+        change.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
     commands.add_parser("auth-test", help="test login using local credentials, then discard the session")
     commands.add_parser("shell", help="interactive session: log in once, search and download repeatedly")
     commands.add_parser("check", help="check public HTTPS access without credentials")

@@ -14,6 +14,8 @@ def show_books(books, *, file=None):
         reference = f" · {book.book_id}:{book.book_hash}" if book.book_id and book.book_hash else ""
         saved = " [saved]" if book.is_favorite else ""
         print(f"{index:2}. {book.title}{saved}\n    {book.authors} · {book.year} · {book.language} · {book.extension.upper() or '?'} · {book.size}{reference}", file=file)
+        if getattr(book, "entry_id", None):
+            print(f"    Booklist entry: {book.entry_id}", file=file)
 
 
 
@@ -104,6 +106,16 @@ def run_library_command(client: Client, args):
         else:
             state = "Added to" if result.is_favorite else "Removed from"
             print(f"{state} favorites: {result.book_id}")
+        return
+
+    if args.command == "booklists" and args.booklist_action in ("add", "remove"):
+        if args.booklist_action == "add":
+            result = client.add_booklist_book(args.booklist_id, args.reference)
+            message = f"Added book {result.book_id} to booklist {result.booklist_id}."
+        else:
+            result = client.remove_booklist_book(args.booklist_id, args.entry_id)
+            message = f"Removed entry {result.entry_id} from booklist {result.booklist_id}."
+        print(json.dumps(result.to_dict()) if args.json else message)
         return
 
     if args.command == "library":

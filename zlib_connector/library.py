@@ -3,7 +3,8 @@
 from dataclasses import asdict, dataclass
 import re
 
-from .client import _clean_text
+from .client import Book, _clean_text
+from .books import parse_book
 from .errors import FormatChangedError
 from .pagination import BookPage
 
@@ -12,10 +13,56 @@ FAVORITE_ORDERS = ("saved_date", "saved_dateA", "titleA", "title", "year", "file
 HISTORY_ORDERS = ("downloaded_date", "downloaded_dateA", "titleA", "title", "year", "filesize", "filesizeA")
 
 
-def booklist_id(value: str | int) -> str:
+def _positive_id(value: str | int, label: str) -> str:
     if type(value) not in (str, int) or not re.fullmatch(r"[1-9][0-9]{0,19}", str(value)):
-        raise ValueError("Booklist ID must be a positive integer of at most 20 digits.")
+        raise ValueError(f"{label} must be a positive integer of at most 20 digits.")
     return str(value)
+
+
+def booklist_id(value: str | int) -> str:
+    return _positive_id(value, "Booklist ID")
+
+
+def booklist_entry_id(value: str | int) -> str:
+    return _positive_id(value, "Booklist entry ID")
+
+
+@dataclass(frozen=True)
+class BooklistBook(Book):
+    booklist_id: str = ""
+    entry_id: str | None = None
+
+
+@dataclass(frozen=True)
+class BooklistBookUpdate:
+    booklist_id: str
+    action: str
+    book_id: str | None = None
+    entry_id: str | None = None
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+def parse_booklist_books(rows, domain: str, identifier: str) -> list[BooklistBook]:
+    if not isinstance(rows, list):
+        raise FormatChangedError("The API response has no collection books list.")
+    books = []
+    for row in rows:
+        if not isinstance(row, dict) or not isinstance(row.get("book"), dict):
+            raise FormatChangedError("The API returned an unavailable or invalid booklist entry.")
+        entry_id = row.get("readlist_books_id")
+        if entry_id is not None:
+            try:
+                entry_id = booklist_entry_id(entry_id)
+            except ValueError:
+                raise FormatChangedError("The API returned an invalid booklist entry ID.") from None
+        record = row["book"]
+        if "_isUserSavedBook" not in record and "_isUserSavedBook" in row:
+            record = {**record, "_isUserSavedBook": row["_isUserSavedBook"]}
+        book = parse_book(record, domain)
+        books.append(BooklistBook(**book.to_dict(), booklist_id=identifier, entry_id=entry_id))
+    return books
 
 
 @dataclass(frozen=True)

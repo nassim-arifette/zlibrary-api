@@ -184,6 +184,31 @@ retrying. These mutation paths are covered with synthetic responses, including
 redirects and cancellation, rather than changes to the configured account.
 The endpoint reference is the [existing Python wrapper](https://github.com/bipinkrish/Zlibrary-API/blob/main/Zlibrary.py).
 
+### Books in booklists
+
+`get_booklist_books()` returns `BooklistBook` records, which extend `Book` with
+`booklist_id` and `entry_id`. The entry ID comes from `readlist_books_id` in the
+server's wrapper around each book. It is distinct from the catalog book ID and
+remains null when absent. Wrapped favorite flags are also preserved.
+
+| Python method | CLI command |
+| --- | --- |
+| `add_booklist_book(booklist_id, "ID:HASH")` | `booklists add BOOKLIST_ID ID:HASH` |
+| `remove_booklist_book(booklist_id, entry_id)` | `booklists remove BOOKLIST_ID ENTRY_ID` |
+
+These require login and return `BooklistBookUpdate` with the list, action and
+affected book or entry ID after a confirmed response. Adding a book does not
+invent its new entry ID; read the list to obtain it. CLI updates require an
+interactive confirmation or `--yes`. The client never follows redirects or
+retries these mutations. An unreadable result raises `MutationUncertainError`.
+
+The site's [bookmark script](https://z-lib.by/resources/js/user-bookmarks.js),
+read on 2026-11-09, uses `GET /papi/booklist/{id}/add-book/{book_id}` and
+`GET /papi/booklist/{id}/remove-book/{entry_id}`. Account reads confirmed the
+entry schema; mutation behavior is covered by synthetic tests. No real booklist
+was modified to validate these commands. Creating, editing and deleting the
+lists themselves remain separate planned operations.
+
 Book records now include `is_favorite`: true/false when the service supplies a
 recognized saved flag, otherwise null. Books read from the favorites collection
 are marked true. A missing flag is not interpreted as an unsaved book.

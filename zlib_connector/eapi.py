@@ -10,7 +10,10 @@ from .errors import AuthenticationError, ChallengeRequired, DownloadError, Forma
 from .search import SearchFilters, SearchPage, parse_page, validate_search
 from .books import BookDetails, BookFormat, BookReference, parse_books, parse_details, parse_format
 from .account import AccountProfile, DownloadQuota, parse_profile
-from .library import FAVORITE_ORDERS, HISTORY_ORDERS, Booklist, FavoriteUpdate, LibraryOverview, booklist_id, parse_booklist
+from .library import (
+    FAVORITE_ORDERS, HISTORY_ORDERS, Booklist, BooklistBookUpdate, FavoriteUpdate,
+    LibraryOverview, booklist_entry_id, booklist_id, parse_booklist, parse_booklist_books,
+)
 from .pagination import BookPage, validate_page
 
 
@@ -107,17 +110,10 @@ class Client(HtmlClient):
             raise FormatChangedError("The API response has no formats list.")
         return [parse_format(row) for row in rows]
 
-    def _collection_page(self, path: str, *, page: int, limit: int, form=None, wrapped=False) -> BookPage:
-        payload = self._json(path, form=form)
-        rows = payload.get("books")
-        if not isinstance(rows, list):
-            raise FormatChangedError("The API response has no collection books list.")
-        if wrapped:
-            if any(not isinstance(row, dict) or not isinstance(row.get("book"), dict) for row in rows):
-                raise FormatChangedError("The API returned an unavailable or invalid booklist entry.")
-            rows = [row["book"] for row in rows]
+    def _collection_page(self, path: str, *, page: int, limit: int) -> BookPage:
+        payload = self._json(path)
         # Keep sparse and unsupported-format records visible; details can resolve them later.
-        return parse_page(payload, parse_books(rows, self.domain), page, limit)
+        return parse_page(payload, parse_books(payload.get("books"), self.domain), page, limit)
 
     def _account_books(self, collection: str, *, page: int, limit: int, order: str | None) -> BookPage:
         self._require_login()
@@ -161,8 +157,25 @@ class Client(HtmlClient):
         identifier = booklist_id(identifier)
         validate_page(page, 20)
         # This is a read operation despite the upstream endpoint requiring POST.
-        return self._collection_page(f"papi/booklist/{identifier}/get-books/{page}",
-                                     page=page, limit=20, form={}, wrapped=True)
+        payload = self._json(f"papi/booklist/{identifier}/get-books/{page}", form={})
+        books = parse_booklist_books(payload.get("books"), self.domain, identifier)
+        return parse_page(payload, books, page, 20)
+
+    def add_booklist_book(self, identifier: str | int, reference: str) -> BooklistBookUpdate:
+        """Add a book to an existing list; a failed confirmation is never retried."""
+        self._require_login()
+        identifier = booklist_id(identifier)
+        reference = BookReference.parse(reference, self.domain)
+        self._json(f"papi/booklist/{identifier}/add-book/{reference.book_id}", mutation=True)
+        return BooklistBookUpdate(identifier, "add", book_id=reference.book_id)
+
+    def remove_booklist_book(self, identifier: str | int, entry_id: str | int) -> BooklistBookUpdate:
+        """Remove the list entry returned by get_booklist_books(), not a catalog book ID."""
+        self._require_login()
+        identifier = booklist_id(identifier)
+        entry_id = booklist_entry_id(entry_id)
+        self._json(f"papi/booklist/{identifier}/remove-book/{entry_id}", mutation=True)
+        return BooklistBookUpdate(identifier, "remove", entry_id=entry_id)
 
     def get_library(self, *, limit: int = 5) -> LibraryOverview:
         """Show separate account collections; no local-file inventory is implied."""
