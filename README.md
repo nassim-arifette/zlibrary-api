@@ -6,9 +6,8 @@ Search for books, inspect editions, download files and access your favorites,
 booklists and download history.
 
 **Available today:** a Python library, CLI and interactive shell, including
-browsing and updating favorites, reading download history, and adding or removing
-books in existing booklists. Creating and renaming lists, the TUI and the HTTP API
-are planned.
+browsing and updating favorites, reading download history, and creating, editing
+and deleting booklists. The TUI and the HTTP API are planned.
 This is an unofficial client.
 
 ## Get started
@@ -137,6 +136,23 @@ calls it `entry_id`. This number identifies the entry in that list, so it differ
 from the book ID. Both commands ask for confirmation. Use `--yes --json` in a
 script. If an update cannot be confirmed, reopen the list before retrying.
 
+To create and manage your lists:
+
+```sh
+zlib-cli booklists create "Science" --description "Books to explore"
+zlib-cli booklists edit BOOKLIST_ID --title "Science and nature"
+zlib-cli booklists edit BOOKLIST_ID --public
+zlib-cli booklists delete BOOKLIST_ID
+```
+
+New lists are **private by default**. Choose `--public` to share one, or `--private`
+to make it private. Editing changes only the settings you provide; for example,
+renaming keeps the current description, visibility and color. Descriptions can
+contain up to 1000 characters and names up to 120. `--color` accepts 0 through 5.
+
+Deletion is permanent on Z-Library and asks for confirmation. As with other
+account changes, scripts must pass `--yes`; add `--json` for the returned result.
+
 ## Find your next book
 
 ```sh
@@ -235,8 +251,9 @@ For more context on diagnostics and errors, see the [reference](docs/reference.m
 
 The next steps focus on your library and reading lists:
 
-- **Booklists:** create, rename and delete lists, manage visibility and move
-  selections between lists. Browsing and adding or removing books are available.
+- **Booklists:** move selections between lists, import/export their contents and
+  browse public lists. Creating, editing, deleting and adding or removing books
+  are available.
 - **Local history:** find downloaded files on your computer and detect missing
   files or duplicates alongside the account history.
 - **Reading queues:** import a list, choose editions, skip duplicates and follow

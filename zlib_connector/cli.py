@@ -11,10 +11,10 @@ from .errors import ConnectorError
 from .search import SearchFilters, validate_search
 from .books import BookReference
 from .diagnostics import KNOWN_DOMAINS, diagnose_domains
-from .library import booklist_entry_id, booklist_id
+from .booklists import BooklistSettings, booklist_entry_id, booklist_id, validate_booklist_changes
 from .pagination import validate_page
-from .cli_parser import CATALOG_COMMANDS, DISCOVERY_COMMANDS, LIBRARY_COMMANDS, parser
-from .cli_views import run_catalog_command, run_library_command, show_books
+from .cli_parser import BOOKLIST_MUTATIONS, CATALOG_COMMANDS, DISCOVERY_COMMANDS, LIBRARY_COMMANDS, parser
+from .cli_views import account_confirmation, booklist_options, run_catalog_command, run_library_command, show_books
 
 
 def prompt(label: str) -> str:
@@ -102,7 +102,7 @@ def main(argv: list[str] | None = None) -> int:
         filters = None
         reference = None
         favorite_change = args.command == "favorites" and args.favorite_action in ("add", "remove")
-        booklist_change = args.command == "booklists" and args.booklist_action in ("add", "remove")
+        booklist_change = args.command == "booklists" and args.booklist_action in BOOKLIST_MUTATIONS
         account_change = favorite_change or booklist_change
         if account_change and not args.yes and not sys.stdin.isatty():
             raise ValueError("Use --yes to apply an account update in non-interactive mode.")
@@ -112,14 +112,18 @@ def main(argv: list[str] | None = None) -> int:
                 raise ValueError("List pagination and ordering cannot be used with a favorite update.")
         if args.command in ("favorites", "history", "library"):
             validate_page(getattr(args, "page", 1), args.limit)
-        if args.command == "booklists" and args.booklist_action in ("show", "add", "remove"):
+        if args.command == "booklists" and args.booklist_action in ("show", "add", "remove", "edit", "delete"):
             booklist_id(args.booklist_id)
             if args.booklist_action == "show":
                 validate_page(args.page, 20)
             elif args.booklist_action == "add":
                 reference = args.reference
-            else:
+            elif args.booklist_action == "remove":
                 booklist_entry_id(args.entry_id)
+            elif args.booklist_action == "edit":
+                validate_booklist_changes(**booklist_options(args))
+        if args.command == "booklists" and args.booklist_action == "create":
+            BooklistSettings(**booklist_options(args))
         if args.command in DISCOVERY_COMMANDS and not 1 <= args.limit <= 1000:
             raise ValueError("Choose a display limit between 1 and 1000 books.")
         if args.command in ("info", "formats", "similar"):
@@ -143,16 +147,7 @@ def main(argv: list[str] | None = None) -> int:
             if reference is not None:
                 BookReference.parse(reference, client.domain)
             if account_change and not args.yes:
-                if favorite_change:
-                    action = "Add to" if args.favorite_action == "add" else "Remove from"
-                    identifier = BookReference.parse(reference, client.domain).book_id
-                    message = f"{action} favorites on {client.domain}: book {identifier}? [y/N] "
-                elif args.booklist_action == "add":
-                    identifier = BookReference.parse(reference, client.domain).book_id
-                    message = f"Add book {identifier} to booklist {args.booklist_id} on {client.domain}? [y/N] "
-                else:
-                    message = f"Remove entry {args.entry_id} from booklist {args.booklist_id} on {client.domain}? [y/N] "
-                if prompt(message).lower() not in ("y", "yes"):
+                if prompt(account_confirmation(args, client.domain)).lower() not in ("y", "yes"):
                     print("Cancelled.", file=sys.stderr)
                     return 130
             email = credentials.email or prompt("Email: ")

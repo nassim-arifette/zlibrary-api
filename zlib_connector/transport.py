@@ -4,6 +4,7 @@ import http.client
 from http.cookies import SimpleCookie
 from http.cookiejar import CookieJar, DefaultCookiePolicy
 import ipaddress
+import json
 import socket
 import ssl
 import time
@@ -62,7 +63,15 @@ class Transport:
         return bool(values.get("remix_userkey")) and values.get("remix_userid", "0") not in ("", "0")
 
     def request(self, url: str, *, form: dict[str, str | list[str]] | None = None,
-                download: bool = False, follow_redirects: bool = True) -> Response:
+                json_body: dict | None = None, download: bool = False, follow_redirects: bool = True) -> Response:
+        if form is not None and json_body is not None:
+            raise ValueError("Choose a form or a JSON body, not both.")
+        payload = urlencode(form, doseq=True).encode() if form is not None else None
+        content_type = "application/x-www-form-urlencoded"
+        if json_body is not None:
+            payload = json.dumps(json_body, ensure_ascii=False, allow_nan=False).encode("utf-8")
+            # PAPI's browser client sends JSON via Request(string), with this MIME type.
+            content_type = "text/plain;charset=UTF-8"
         deadline = time.monotonic() + self.timeout
         for _ in range(6):
             validate_url(url)
@@ -92,10 +101,9 @@ class Transport:
                         return sock
                 raise last_error
             connection._create_connection = connect
-            payload = urlencode(form, doseq=True).encode() if form is not None else None
             request = Request(url, data=payload, headers={"User-Agent": "ZlibConnector/0.1", "Accept": "*/*", "Accept-Encoding": "identity"})
             if payload is not None:
-                request.add_header("Content-Type", "application/x-www-form-urlencoded")
+                request.add_header("Content-Type", content_type)
             self.cookies.add_cookie_header(request)
             if parsed.path.startswith("/eapi/"):
                 scoped_cookies = SimpleCookie()
@@ -107,7 +115,7 @@ class Transport:
                 path = parsed.path or "/"
                 if parsed.query:
                     path += "?" + parsed.query
-                connection.request("POST" if form is not None else "GET", path, payload, dict(request.header_items()))
+                connection.request("POST" if payload is not None else "GET", path, payload, dict(request.header_items()))
                 response = connection.getresponse()
                 self.cookies.extract_cookies(response, request)
                 if response.status in (301, 302, 303, 307, 308):
@@ -120,7 +128,7 @@ class Transport:
                     validate_url(target)
                     next_url = urlsplit(target)
                     same_origin = (parsed.scheme, parsed.hostname, parsed.port or 443) == (next_url.scheme, next_url.hostname, next_url.port or 443)
-                    if form is not None and (not same_origin or response.status not in (307, 308)):
+                    if payload is not None and (not same_origin or response.status not in (307, 308)):
                         raise NetworkError("The request redirects to a different origin or flow. Set the current site domain explicitly; form data was not forwarded.", reason="redirect")
                     followup = Request(target)
                     self.cookies.add_cookie_header(followup)

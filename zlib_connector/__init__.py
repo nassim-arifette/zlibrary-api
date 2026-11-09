@@ -5,7 +5,8 @@ from .search import SearchFilters, SearchPage
 from .books import BookDetails, BookFormat, BookReference
 from .account import AccountProfile, DownloadQuota
 from .diagnostics import DomainDiagnostic, DomainReport, diagnose_domains
-from .library import Booklist, BooklistBook, BooklistBookUpdate, FavoriteUpdate, LibraryOverview
+from .library import FavoriteUpdate, LibraryOverview
+from .booklists import Booklist, BooklistBook, BooklistBookUpdate, BooklistDeletion, BooklistSettings
 from .pagination import BookPage
 from .errors import (
     AuthenticationError, ChallengeRequired, ConnectorError, DownloadError,
@@ -15,7 +16,8 @@ from .errors import (
 __all__ = [
     "Client", "Book", "BookDetails", "BookFormat", "BookReference", "BookPage",
     "SearchFilters", "SearchPage", "AccountProfile", "DownloadQuota",
-    "Booklist", "BooklistBook", "BooklistBookUpdate", "FavoriteUpdate", "LibraryOverview",
+    "Booklist", "BooklistBook", "BooklistBookUpdate", "BooklistDeletion", "BooklistSettings",
+    "FavoriteUpdate", "LibraryOverview",
     "DomainDiagnostic", "DomainReport", "diagnose_domains",
     "ConnectorError", "AuthenticationError", "ChallengeRequired", "DownloadError",
     "FormatChangedError", "MutationUncertainError", "NetworkError", "RateLimitError",
