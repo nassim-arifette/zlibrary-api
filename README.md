@@ -1,387 +1,233 @@
 # Zlibrary API
 
-An API, CLI and TUI for Z-Library.
+An unofficial Z-Library client: the `zlib-cli` command-line tool, a local HTTP API, an optional
+terminal interface and a Python library (package `zlib-connector`, import `zlib_connector`). Find
+books, download one or a whole reading list, and manage your favorites, booklists and tags.
 
-Search for books, inspect editions, download files and access your favorites,
-booklists and download history.
+> **Unofficial client.** This project is not affiliated with Z-Library. It relies on unofficial
+> interfaces that can change or break without notice, and which domains work depends on your
+> network and the day.
 
-**Available today:** a Python library, HTTP API, CLI, collections TUI and interactive shell.
-You can manage favorites, booklists and native tags, read Z-Library's
-download history, and download several books from a list.
-The TUI browses favorites, booklists and download history, with book details.
-Search, collection editing and download management in the TUI are still planned.
-This is an unofficial client.
+## Quick start
 
-## Get started
+You need Python 3.11 or later; Windows and Linux are tested, macOS is not. Downloads need a
+Z-Library account.
 
-You need **Python 3.11 or later**. From the project folder, install the command:
+1. Install `zlib-cli` in a virtual environment. In each new terminal, run the activation line (the
+   fourth) again from the project folder.
+
+   Windows (PowerShell):
+
+   ```powershell
+   git clone https://github.com/nassim-arifette/zlibrary-api.git
+   cd zlibrary-api
+   python -m venv .venv
+   .venv\Scripts\Activate.ps1
+   python -m pip install -e .
+   ```
+
+   Linux (bash):
+
+   ```bash
+   git clone https://github.com/nassim-arifette/zlibrary-api.git
+   cd zlibrary-api
+   python3 -m venv .venv
+   source .venv/bin/activate
+   python -m pip install -e .
+   ```
+
+2. Find a domain that works from your network. `doctor` tries a real search on each known domain,
+   without signing in, and ends with `Suggested domain: ...`.
+
+   ```sh
+   zlib-cli --timeout 5 doctor
+   ```
+
+3. Sign in on that domain (replace `https://z-lib.by/`). You are asked for your email and password;
+   the password stays hidden. The session is saved, and later commands reuse it and its domain.
+
+   ```sh
+   zlib-cli --domain https://z-lib.by/ login
+   ```
+
+4. Search, download and check your quota. Each search result ends with its reference, `ID:HASH`.
+   `download` lists the matches and asks which one to save in the current folder;
+   `zlib-cli download ID:HASH` takes one exact edition instead. `quota` shows how many downloads you
+   have left today: every download counts against this daily limit.
+
+   ```sh
+   zlib-cli search "Pride and Prejudice" --format epub --limit 5
+   zlib-cli download "Pride and Prejudice" --format epub
+   zlib-cli quota
+   ```
+
+Global options such as `--domain` and `--timeout` always go before the command name.
+
+## Find books
 
 ```sh
-python -m pip install -e .
+zlib-cli search "history" --language french --year-from 2000 --order popular --page 2
+zlib-cli info ID:HASH
+zlib-cli formats ID:HASH
+zlib-cli similar ID:HASH
+zlib-cli popular
+zlib-cli recommended
 ```
 
-You can also run it without installing: replace `zlib-cli` in the examples with
-`python -m zlib_connector`.
+- `search` takes a title, author or ISBN. Repeat `--format` (pdf, epub, djvu) or `--language` to
+  accept several values. `--year-from`, `--year-to` and `--order` narrow and sort the results.
+  `--limit` sets the page size (default 20, up to 50) and `--page` moves between pages.
+- `ID:HASH` is the reference printed after each result, such as `123:ab12`; the book's URL on the
+  same domain works too. `info` shows the book's details, and `formats` lists its other formats,
+  each with its own reference.
+- `similar`, `popular` and `recommended` show Z-Library's suggestions.
+- `--anonymous` (on `search`, `info`, `formats`, `similar` and `popular`) works without your
+  account. It uses `--domain`, or `https://z-lib.by/` by default, never your saved domain.
 
-### Find a working domain
+## Download books
+
+### One book
 
 ```sh
-zlib-cli --timeout 5 doctor
+mkdir books
+zlib-cli download "Emma" --format epub --language english --output books
+zlib-cli download ID:HASH --output books
 ```
 
-`doctor` tries a real search on the known domains and suggests one that responds.
-It reports blocked requests, connection problems and timeouts without signing in.
-The result depends on your network and when you run it.
+A title, author or ISBN is searched with the filters of `search`, and you choose a result
+(`--pick N` chooses without asking). A reference downloads that edition directly. `--output` must be
+an existing folder; the default is the current one. PDF, EPUB and DjVu files up to 256 MiB are
+supported. In a terminal, progress shows on stderr; `--progress` and `--no-progress` force it on or
+off.
 
-The examples below use `https://z-lib.by/`. Replace it with a working domain from
-your results. Options such as `--domain`, `--timeout` and `--credentials` go
-**before** the command name.
+Ctrl+C cancels and removes the partial file, and a book is saved only after its file is checked.
+Downloads are never retried automatically and cannot be resumed. Once the download link was
+requested, a download can count against your quota even if it fails or you cancel it.
 
-### Search for a book
+`zlib-cli shell` signs in once, then takes `search "QUERY" [filters]` (quote the query when you add
+filters), `next`, `prev`, `download NUMBER [FOLDER]` for the last page shown, and `quit`. It also
+accepts `--progress` and `--no-progress`.
 
-```sh
-zlib-cli --domain https://z-lib.by/ search "Pride and Prejudice" --anonymous --format epub --limit 5
-```
-
-Search by title, author or ISBN. `--anonymous` lets you browse without loading
-your account details. It uses the domain you pass explicitly, or `z-lib.by` by
-default.
-
-To narrow the results, choose a language, publication years and a sort order:
+### A reading list
 
 ```sh
-zlib-cli --domain https://z-lib.by/ search "history" --anonymous --language french --year-from 2000 --order bestmatch
-```
-
-You can repeat `--language` and `--format` to include several values. Use
-`--page 2` for the next page, or add `--json --with-pagination` to include the
-available page counts and navigation in a script.
-
-### Choose and download
-
-```sh
-zlib-cli --domain https://z-lib.by/ download "Pride and Prejudice" --format epub --output .
-```
-
-The command verifies your saved session or signs in, then lists the results and
-asks which one to download. If no session or credentials are saved, it prompts
-for your email and password. Password input is hidden. Downloads support
-**PDF, EPUB and DjVu** and require an existing
-destination folder; `.` means the current folder.
-
-Books are written to disk as they arrive, with progress on stderr when you use
-a terminal. It shows received bytes, average speed and an estimate when the
-server supplies a total size. `--progress` also enables it in scripts;
-`--no-progress` keeps it quiet. JSON results on stdout stay unchanged.
-
-Press Ctrl+C to cancel. The temporary file is removed, and the final file is
-published only after validation. There is no automatic retry or partial-file
-resume yet; a request already sent to Z-Library may have consumed quota.
-
-For a precise edition, use the `book_id` and `book_hash` from a JSON search result
-as `ID:HASH`. Replace that placeholder in these commands with the actual values:
-
-```sh
-zlib-cli --domain https://z-lib.by/ info "ID:HASH" --anonymous
-zlib-cli --domain https://z-lib.by/ formats "ID:HASH" --anonymous
-zlib-cli --domain https://z-lib.by/ download "ID:HASH" --output .
-```
-
-The details include the description, publisher, edition, pages and valid ISBNs
-when the service supplies them. Alternative formats have their own references.
-A direct download uses the edition you selected without running another search.
-You can also pass its book URL from the selected domain.
-
-### Check your quota
-
-```sh
-zlib-cli --domain https://z-lib.by/ quota
-```
-
-This shows your daily limit, downloads used and downloads remaining. If a counter
-is missing from the response, it appears as `unknown`. Add `--json` for scripts.
-
-## Download several books
-
-Pass several titles, ISBNs or `ID:HASH` references, or a list file with `-a`:
-
-```sh
-zlib-cli download "Dune" "Neuromancer" "9780441013593" --format epub --output books
+zlib-cli download "Dune" "Neuromancer" "Foundation" --format epub --output books
 zlib-cli download -a reading-list.txt --output books
-zlib-cli download -a reading-list.csv --pick 1 --yes --output books
 ```
 
-A **text list** has one title, author, ISBN, `ID:HASH` or book URL per line. Blank
-lines and lines starting with `#` are skipped. A **CSV list** needs a header row
-with a `title`, `query`, `isbn` or `reference` column; `author` is added to the
-title. Other columns, such as those in Goodreads, StoryGraph or Calibre exports,
-are ignored and listed on stderr. A `.tsv` file is read with tabs, and a header
-of one column such as `title` keeps commas inside the titles. Put values that
-contain the delimiter in double quotes. A row's `extension` (or a `format` of pdf, epub
-or djvu) and `language` replace the search filters for that row. **JSON** works too, including the output
-of `search --json`, `favorites --json` or `booklists show ID --json`: their books
-are downloaded as those exact editions, without a new search.
+Give several titles, ISBNs or references, or a list with `-a` (up to 1000 items):
 
-In a terminal, each search shows its first five results on stderr and asks
-`Choose 1-5, s to skip, q to stop`. The command never chooses an edition by
-itself. Without a terminal, `--pick N` takes result N of every search, in the
-order Z-Library returns them, so check that the match is the edition you want.
-An item with fewer results is reported as not found. `q` stops choosing, then
-the plan and `Download N books into FOLDER? [y/N]` follow. Scripts must pass
-`--yes`. Search filters apply only to searches, not to references. A title or
-edition listed twice is downloaded once.
+- text: one title, author, ISBN, reference or book URL per line; blank lines and lines starting with
+  `#` are skipped;
+- CSV or TSV: a header with a `title`, `query`, `isbn` or `reference` column, plus `author` if you
+  like; other columns, such as the extra ones in Goodreads, StoryGraph or Calibre exports, are
+  ignored;
+- JSON, such as the `--json` output of `search`, `favorites` or `booklists show`, whose exact
+  editions are downloaded without a new search.
 
-Each book gets a line on stdout with the request, the matched edition and its
-file, followed by a summary. Progress bars and prompts stay on stderr. Add `--json`
-to receive one report object at the end instead.
+In a terminal, each search shows up to five candidates (`--limit`, up to 50) and asks you to choose
+one, skip (`s`) or stop (`q`); the command never chooses for you. A book listed twice is downloaded
+once. You then confirm the plan, which shows your quota when it is known. Without a terminal, pass
+`--pick N --yes`: `--pick N` takes result N of every search without checking that it is the right
+edition, so review the plan first. Press Ctrl+C once to stop after the current book, twice to also
+cancel that download (its quota may already be used), and three times to stop at once.
 
-### Continue a list later
+### Finish a list later
 
-The quota is checked before each download. When no downloads remain, the batch
-stops and the other books wait. For `-a reading-list.csv`, progress is kept in
-`reading-list.progress.json` beside the list; choose another file with
-`--report FILE`, or none with `--no-report`. **Run the same command again** after
-the quota renews: books already downloaded, your choices and your skips are reused,
-and only the rest is searched or downloaded. Titles given on the command line have
-no report unless you add `--report FILE`. Without one, a script stops before
-downloading when the quota or `--max-downloads` may not cover them all;
-`--no-report` downloads what they allow anyway. When a run without a report stops
-early after downloading some books, it names the books still to download: run
-again with only those, because the same command would download the finished books
-a second time.
-
-A download that fails after its link was requested may have used quota. It is
-never retried automatically. Check the folder and your Z-Library download history,
-then add `--retry-uncertain` to try it again; once that run is done, run the list
-again without the option. A book larger than 256 MiB cannot be downloaded by this
-client: it is reported once and never requested again, even with
-`--retry-uncertain`. To get another edition, replace its line with that edition's
-`ID:HASH` (`zlib-cli search` lists them), or reword the search, for example by
-adding the author; a change of case or spacing alone keeps the same line.
-
-The report records books by file name, and they are looked up in the output
-folder, so continue a list with the same `--output`. When none of the books the
-report recorded in another folder is in the output folder, a script stops before
-any request and names that folder; in a terminal the command says so and goes on.
-The report keeps its folder until a book is found or downloaded in the new one. A
-book recorded as downloaded whose file is not there is not downloaded again
-unless you add `--redownload-missing`. `--max-downloads N` keeps part of your
+The quota is checked before each book. When it runs out, the other books wait: run the same command
+again after it renews. `reading-list.progress.json`, next to the list, remembers finished books,
+choices and skips. It records books by file name, so keep the same `--output` folder. Titles given
+on the command line get a progress file only with `--report FILE`. `--max-downloads N` keeps some
 quota for later.
 
-### Review a plan first
+A download that fails after its link was requested may have used quota, so it is never retried
+automatically, in this run or later ones. Check the folder and `zlib-cli history`, then run the same
+command once with `--retry-uncertain`.
+
+### Review the plan first
 
 ```sh
 zlib-cli download -a reading-list.txt --dry-run --json > plan.json
 zlib-cli download -a plan.json --report reading-list.progress.json --yes --output books
 ```
 
-`--dry-run` searches without downloading anything or writing the report, and the
-choices it shows are kept only in the `--json` plan. Items that still need a
-choice list their candidates; set `"pick": 2` or a `"reference"` in `plan.json`.
-To check your edits, dry-run the plan without `--json`: redirecting a command's
-output into the file it reads empties that file first. Downloading the plan reuses
-its editions without searching again. It needs `--report FILE` or `--no-report`,
-also when it is piped with `-a -`: pass the list's progress file, as above, so
-that running the list again knows what the plan downloaded. An item that was
-already downloaded or attempted keeps its edition. To get another edition too, add
-its `ID:HASH` as a new line of the list, or a plan item whose `source` is
-`{"reference": "ID:HASH"}`; a copy of the item would be skipped as a duplicate.
+`--dry-run` chooses editions without downloading anything. In `plan.json`, set `"pick": 2` or a
+`"reference"` for items that still need a choice. Downloading a plan needs `--report FILE`, with the
+list's progress file so that later runs of the list know about it, or `--no-report`. The
+[reference](docs/reference.md#batch-downloads) covers every list format, option and status.
 
-The command exits with **0** when every book is downloaded, already present, a
-duplicate or skipped, **3** when books only wait (quota, `--max-downloads` or a
-temporary failure; run it again later), **4** when items need attention (not found,
-errors, uncertain downloads, missing choices) and **130** when cancelled. Press
-Ctrl+C once to stop after the current book, twice to cancel that book's download
-too (its quota may already be used), and three times to stop at once.
-
-In PowerShell, pass the list with `-a FILE` rather than piping it, and check
-`$LASTEXITCODE` in scripts. `-a -` reads the list from standard input; it needs a
-saved session from `zlib-cli login`. Large PDFs may need a longer `--timeout`, up
-to 300 seconds. The [reference](docs/reference.md#batch-downloads) describes every
-format, status and report field. For a queue that keeps running in the background,
-see [Run downloads through the API](#run-downloads-through-the-api).
-
-## Browse in the terminal
-
-Install the optional terminal interface from the project folder:
-
-```sh
-python -m pip install -e ".[tui]"
-```
-
-Start the local API in one terminal, then open the TUI in another:
-
-```sh
-zlib-cli serve
-zlib-cli tui
-```
-
-The server verifies your saved session or asks you to sign in. The TUI uses the
-server's local token file and opens your favorites. Browse your booklists or
-Z-Library download history, open a book's details, and return to the same row.
-You can select another starting view with `zlib-cli tui --view history`.
-
-The interface reads your collections; it does not change your account or start
-downloads. Press `?` for help or Ctrl+P for the command palette and themes. Use
-`--no-color` for monochrome output. See the [TUI guide](docs/tui.md) for navigation,
-server options and troubleshooting.
-
-## Browse your library with commands
+## Manage your favorites, booklists and tags
 
 ```sh
 zlib-cli library
-zlib-cli favorites --limit 10
 zlib-cli history --page 2
-zlib-cli booklists
-```
-
-`library` gives you an overview with separate previews of your favorites,
-account download history and booklists. The history comes from Z-Library; it
-doesn't mean those files are still on this computer.
-
-To open one of your booklists, use the ID shown next to its name:
-
-```sh
-zlib-cli booklists show BOOKLIST_ID --page 1
-```
-
-Replace `BOOKLIST_ID` with that number. You can inspect or download any listed
-book using its `ID:HASH` reference. Add `--json` to any of these commands for
-scripts. Reading a list does not modify its books or visibility.
-
-To save a book for later or remove it from your favorites:
-
-```sh
-zlib-cli favorites add "ID:HASH"
-zlib-cli favorites remove "ID:HASH"
-```
-
-Replace `ID:HASH` with the book's reference. The CLI asks before changing the
-account. Scripts must pass `--yes` explicitly and can add `--json` for the result.
-Saved books carry a `[saved]` marker when their state is known. If a connection
-problem leaves an update unconfirmed, check your favorites before trying again.
-
-To add a book to an existing booklist, or remove an entry from it:
-
-```sh
-zlib-cli booklists add BOOKLIST_ID "ID:HASH"
+zlib-cli favorites add ID:HASH
+zlib-cli booklists show BOOKLIST_ID
+zlib-cli booklists add BOOKLIST_ID ID:HASH
 zlib-cli booklists remove BOOKLIST_ID ENTRY_ID
-```
-
-`booklists show` displays the **Booklist entry** number needed for removal; JSON
-calls it `entry_id`. This number identifies the entry in that list, so it differs
-from the book ID. Both commands ask for confirmation. Use `--yes --json` in a
-script. If an update cannot be confirmed, reopen the list before retrying.
-
-To create and manage your lists:
-
-```sh
 zlib-cli booklists create "Science" --description "Books to explore"
-zlib-cli booklists edit BOOKLIST_ID --title "Science and nature"
-zlib-cli booklists edit BOOKLIST_ID --public
-zlib-cli booklists delete BOOKLIST_ID
+zlib-cli booklists edit BOOKLIST_ID --title "Science and nature" --public
+zlib-cli tags add ID:HASH "To read" "Science"
 ```
 
-New lists are **private by default**. Choose `--public` to share one, or `--private`
-to make it private. Editing changes only the settings you provide; for example,
-renaming keeps the current description, visibility and color. Descriptions can
-contain up to 1000 characters and names up to 120. `--color` accepts 0 through 5.
+- `library` previews your favorites, download history and booklists; `favorites` and `history` list
+  them page by page. `history` is Z-Library's record of your downloads, not a list of files on this
+  computer. Books in your favorites are marked `[saved]` when that is known.
+- `favorites add` and `favorites remove` take a reference.
+- `booklists` shows each list with its ID first. `ENTRY_ID` is the `Booklist entry` number that
+  `booklists show` prints under each book; it is not the book ID. New lists are private unless you
+  pass `--public`, `edit` changes only what you pass, and `booklists delete` is permanent.
+- `tags` lists your My Library tags. `tags add` also adds the book to your favorites, and
+  `tags remove` keeps it there. Labels are case-sensitive: quote labels with spaces, and copy
+  existing ones from `tags`.
+- Every change shows what it will do and asks `[y/N]`; scripts pass `--yes`. Changes are never
+  retried automatically: if a connection problem leaves one unconfirmed, check before retrying.
 
-Deletion is permanent on Z-Library and asks for confirmation. As with other
-account changes, scripts must pass `--yes`; add `--json` for the returned result.
+## Browse in the terminal
 
-### Organize books with tags
+An optional, read-only terminal interface shows your favorites, booklists, download history and book
+details; it does not change your account or start downloads. It reads from the local HTTP API: start
+a signed-in server (not `--anonymous`), then the interface in a second terminal with the virtual
+environment active. Press `?` for the keys and `q` to quit.
 
 ```sh
-zlib-cli tags
-zlib-cli tags add "ID:HASH" "To read" "Science"
-zlib-cli tags remove "ID:HASH" "To read"
+python -m pip install -e ".[tui]"
+zlib-cli serve
+# in a second terminal:
+zlib-cli tui
 ```
 
-These are the tags from the website's **My Library**. Adding a tag also saves
-the book to your favorites; the confirmation mentions both changes. Removing a
-tag keeps the favorite. Labels are case-sensitive and can contain spaces when
-quoted. Use the exact label shown by `tags`; the client preserves its spelling.
+The [TUI guide](docs/tui.md) covers views, options and troubleshooting.
 
-Use `tags saved-ids` to get the native saved-book identifiers. Each command
-supports `--json`, and tag changes require confirmation or `--yes`.
-Browsing the full native My Library page and searching it by tag are still
-planned; the `library` command currently provides the collection overview above.
-
-## Find your next book
+## Sign-in and privacy
 
 ```sh
-zlib-cli popular --anonymous --limit 10
-zlib-cli similar "ID:HASH" --anonymous
-zlib-cli recommended
-```
-
-`popular` shows the service's popular titles, `similar` starts from a book's
-reference, and `recommended` uses your account's recommendations. Add `--json`
-to use the results in a script. `--limit` controls how many books are shown from
-the returned list; these views do not currently expose pagination or filters.
-
-Some suggestions include only a title, author and reference. Open their details
-with `info` or pass the reference to `download` to resolve the available format.
-The recent-additions endpoint currently returns no book list on the tested
-domain, so that view is not available yet.
-
-## Keep a session open
-
-Use the interactive shell to search and download several books after one login:
-
-```sh
-zlib-cli --domain https://z-lib.by/ shell
-```
-
-```text
-zlib> search "history" --language french --format epub
-zlib> next
-zlib> prev
-zlib> download 1 .
-zlib> quit
-```
-
-Result numbers refer to the most recently displayed page. The shell releases its
-in-memory session when you leave; a saved session can be reused by later commands.
-The shell uses the same streaming download and progress display; start it with
-`shell --no-progress` or `shell --progress` to override automatic display.
-
-## Stay signed in
-
-Sign in once and save the session for later commands:
-
-```sh
-zlib-cli --domain https://z-lib.by/ login
-zlib-cli status
+zlib-cli login
 zlib-cli status --verify
-zlib-cli history --json
 zlib-cli logout
 ```
 
-`login` prompts for your account details or reads your existing credentials file.
-It saves only the authentication cookies, with private file permissions; it does
-not save your email or password. Later commands, including `serve`, verify and
-reuse that session. If it expires, run `login` again explicitly.
+- `login` asks for your email and password, or reads the credentials file below; they are never
+  command-line options. It saves only the session cookies, never your email or password.
+- Account commands, `serve` included, reuse the saved session and its domain; if it expired, run
+  `login` again. Without a saved session, or with `--no-session`, they ask for your email and
+  password (or read the credentials file) and sign in for that run only; only `login` saves.
+- A session belongs to one domain. To switch, run `zlib-cli --domain URL login`.
+- `status` checks the saved session without connecting; `--verify` asks Z-Library. `logout` forgets
+  it on this computer only: it does not sign you out on Z-Library or stop a running `shell` or
+  `serve`.
+- `--anonymous` commands and `doctor` never read your session or credentials.
+- The session and the API token are stored in `%LOCALAPPDATA%\zlibrary-api` on Windows and in
+  `~/.local/state/zlibrary-api` elsewhere (`$XDG_STATE_HOME/zlibrary-api` when it is set);
+  `ZLIB_STATE_DIR` overrides both, and `--session-file PATH` picks another session file. These files
+  have private permissions but are not encrypted: keep them, and any copies, out of Git and shared
+  folders.
 
-`status` reads local state without connecting. `status --verify` checks the saved
-session with Z-Library. `logout` forgets the local cookies; it does not revoke the
-server session or stop an already running shell or HTTP server.
-
-The saved session belongs to one domain. To use another domain, run `login` with
-that domain explicitly. Use `--no-session` before a command for an in-memory
-connection, or `--session-file PATH` to select a different private session file.
-Anonymous commands ignore saved sessions and credentials entirely.
-
-The default file is `session.json` under `%LOCALAPPDATA%\zlibrary-api` on Windows
-or `${XDG_STATE_HOME:-~/.local/state}/zlibrary-api` on Linux. `ZLIB_STATE_DIR` can
-select another absolute directory. Cookies are protected by file permissions,
-not encrypted; keep custom session files out of Git and shared folders.
-
-## Use a local credentials file
-
-To supply account details for `login`, create `credentials.local.toml` in the
-project folder, next to `pyproject.toml`, or edit it if it already exists:
+To skip typing your email, copy `credentials.example.toml` to `credentials.local.toml` in the
+project folder and fill it in. Leave `password` empty to be asked each time: a password written here
+is stored in plain text. Git ignores this file, and commands never print credentials or session
+cookies. `zlib-cli` finds the file there after `pip install -e .`; otherwise pass
+`--credentials PATH` before the command.
 
 ```toml
 domain = "https://z-lib.by/"
@@ -389,102 +235,59 @@ email = "you@example.com"
 password = ""
 ```
 
-Fill in your account details locally. Leave the password empty if you prefer to
-enter it at the prompt. This file stores any saved password as plain text, so
-keep it private; Git ignores it. Credentials and session keys stay out of command
-output. Commands without a saved session retain the original in-memory login
-behavior; only `login` saves a session.
+## Use it in scripts
 
-Use `--credentials PATH` before the command to select another file. `--domain`
-overrides its configured domain. When a saved session exists, commands use its
-domain and skip the default credentials file. An explicit `--credentials` file
-still supplies its configured domain. Anonymous commands and domain diagnostics
-never load either file. `auth-test` always tests the supplied credentials without
-reading or saving a persistent session.
+- Results go to stdout; prompts, progress and errors go to stderr. `--json` gives JSON results and
+  errors on every command that prints results except `shell`, `serve` and `tui`; `check` and
+  `auth-test` always print JSON.
+- Without a terminal, account changes need `--yes`. For one book, pass `--pick N` or a reference so
+  that nothing asks. Any list option, even `--yes`, makes `download` a list run, which needs `--yes`
+  (except with `--dry-run`) and, for searched items, `--pick N`. A list run prints one line per book
+  and a summary, or one report object with `--json`.
+- Exit codes: 0 success, 1 error, 2 invalid command line, 130 cancelled; `doctor` returns 1 when no
+  domain works. List runs also return 3 when books only wait (quota, `--max-downloads` or a
+  temporary failure: run the same command later) and 4 when an item needs attention (not found,
+  error, uncertain download or missing choice).
+- In PowerShell, check `$LASTEXITCODE`, and pass lists with `-a FILE` instead of piping them into
+  `-a -`. Reading a list from standard input needs a saved session or an email in the credentials
+  file.
+- Large files may need a longer `--timeout`, up to 300 seconds.
 
-## Run the HTTP API
+## Local HTTP API
 
 ```sh
 zlib-cli serve
 ```
 
-This signs in with your configured account and serves the API at
-`http://127.0.0.1:8000/v1`. Keep the terminal open; press Ctrl+C to stop.
-Use `serve --anonymous` for public search and metadata without loading account
-credentials, or `serve --port 8080` to choose another local port.
+`serve` uses your saved session, or signs you in for this run only, and serves the API at
+`http://127.0.0.1:8000/v1` until you press Ctrl+C. `--port` picks another port, and `--anonymous`
+serves public search and book details without your account. Every request needs the bearer token
+from the file whose path `serve` prints; keep that file private, as it gives access to your account
+through the server. Only local connections are accepted, browsers only from origins you allow with
+`--allow-origin`, and account changes apply at once, without a confirmation. The
+[HTTP API guide](docs/http-api.md) lists the routes and errors and has a Python example.
 
-The first run creates a private bearer-token file and prints its location.
-Every request needs that token, including the health check and OpenAPI document.
-The token is reused on later runs; `--token-file PATH` selects another file.
-
-For example, read your **Z-Library download history** from Python while the
-signed-in server is running:
-
-```python
-from urllib.request import Request, urlopen
-from zlib_connector.local_state import state_directory
-
-token = (state_directory() / "api-token").read_text().strip()
-request = Request(
-    "http://127.0.0.1:8000/v1/history?page=1&limit=20",
-    headers={"Authorization": f"Bearer {token}"},
-)
-with urlopen(request) as response:
-    print(response.read().decode())
-```
-
-`/v1/search`, `/v1/books/ID/HASH`, `/v1/favorites`, `/v1/booklists` and the other
-routes use the same Python client as the CLI. The API includes account history,
-tags, recommendations and domain diagnostics, plus updates to favorites, tags
-and booklists. Authenticated write requests apply the requested account change
-directly. The [HTTP guide](docs/http-api.md) lists the routes and error behavior.
-
-Use `/v1/openapi.json` for the OpenAPI contract and `/v1/capabilities` to check
-what is implemented. Download tasks are available when you enable them below;
-uploads and HTTP login endpoints are still planned. The server accepts local connections only; browser origins are
-blocked unless you explicitly add `--allow-origin http://localhost:3000`.
-
-### Run downloads through the API
-
-Choose an existing folder for the server's downloads:
+### Download queue
 
 ```sh
-zlib-cli serve --download-dir ./downloads
-```
-
-In another terminal, submit a book reference and keep its returned task ID:
-
-```sh
-zlib-cli jobs add "ID:HASH" --key my-first-download --json
+mkdir downloads
+zlib-cli serve --download-dir downloads
+# in a second terminal:
+zlib-cli jobs add ID:HASH --key dune-epub-001
 zlib-cli jobs list
-zlib-cli jobs show TASK_ID --json
-zlib-cli jobs watch TASK_ID
-zlib-cli jobs cancel TASK_ID
-zlib-cli jobs file TASK_ID --output .
+zlib-cli jobs watch 0123456789abcdef0123456789abcdef
+zlib-cli jobs file 0123456789abcdef0123456789abcdef --output books
 ```
 
-Replace `ID:HASH` and `TASK_ID` with your book reference and task ID. `jobs file`
-copies a completed download to your chosen folder without downloading it from
-Z-Library again. All `jobs` commands support `--json`.
+The server downloads queued books one at a time. `--key` is required and names the request: sending
+the same key and book again returns the same task instead of a second download. `jobs add` and
+`jobs list` print each task's 32-character ID, which `show`, `watch`, `cancel` and `file` take (the
+ID above is an example). `jobs file` copies a finished book without downloading it again. When the
+quota runs out, the queue pauses until you run `zlib-cli jobs resume`. Stopping the server
+interrupts the current download, which is not retried. See the
+[download task guide](docs/download-tasks.md).
 
-`jobs watch` follows one task for up to 60 seconds, or until it finishes. Use
-`--duration 300` to watch longer. With `--json`, each line is a complete state
-update. Ctrl+C stops watching; use `jobs cancel` to cancel the download itself.
-
-The server downloads one book at a time. It saves tasks before starting them,
-reports progress and pauses when the account quota is exhausted. After the quota
-renews, use `zlib-cli jobs resume`. Reusing the same `--key` for the same reference
-returns the existing task, including after a server restart.
-
-Closing the server interrupts the active transfer. It does not retry that task;
-unstarted tasks continue when you restart with the same account, domain and
-download folder. Byte-range resume and automatic retries are not available yet.
-
-`jobs` uses the running server's bearer file. For a custom server, place options
-before the action: `zlib-cli jobs --api-url http://127.0.0.1:8080/v1 --token-file PATH list`.
-See the [download task guide](docs/download-tasks.md) for the HTTP and Python API.
-
-## Use it from Python or a script
+## Python library
 
 ```python
 from zlib_connector import Client, SearchFilters
@@ -497,72 +300,64 @@ with Client("https://z-lib.by/") as client:
         print(f"{book.book_id}:{book.book_hash}  {book.title}")
 ```
 
-The Python library also exposes book details, available formats, downloads,
-account quota and domain diagnostics. See the [reference](docs/reference.md) for
-login examples, return types and errors.
+The library also covers sign-in and saved sessions, book details and formats, quota, downloads with
+progress and cancellation, reading lists, account collections and domain checks. The
+[reference](docs/reference.md#python-api) has examples, return types and errors.
 
-For shell scripts, add `--json` to `search`, `info`, `formats`, `download`,
-`profile`, `quota`, `doctor`, `domains`, `library`, `favorites`, `history` or
-`booklists`, `tags`, `login`, `logout`, `status`, `similar`, `popular` or
-`recommended`, or any `jobs` action. Search normally returns an array;
-`--with-pagination` adds a `books` and `pagination` object. Results go to standard
-output, while prompts and errors go to standard error.
-
-## If something goes wrong
+## Troubleshooting
 
 | What you see | What to try |
 | --- | --- |
-| A domain is blocked or stops responding | Run `doctor` again and explicitly select a working domain. |
-| Login fails | Check the domain and credentials, then run `auth-test`. Repeated login attempts won't resolve a domain block. |
-| Saved session expired or refused | Run `login` explicitly on the same domain. A temporary network failure leaves the saved session intact. |
-| Session belongs to another domain | Choose its domain, or run `login` explicitly for the new one. |
-| Another process changed the saved session | Inspect `status` before repeating login or logout. |
-| A browser verification challenge | Try another domain reported by `doctor`. This client cannot complete browser challenges. |
-| No downloads remaining | Check `quota` and wait for the account allowance to renew. |
-| A file cannot be saved | Choose an existing writable folder and check available disk space. |
-| Details or formats are missing | Some records have incomplete metadata or no reported alternatives. |
+| `zlib-cli` is not found | Activate the virtual environment ([Quick start](#quick-start), step 1), or run `python -m zlib_connector` from the project folder. |
+| PowerShell refuses to run `Activate.ps1` | Run `Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned` (for that window only), then activate again. |
+| `unrecognized arguments: --domain ...` | Move global options before the command name: `zlib-cli --domain URL search ...`. |
+| A domain is blocked, stops responding or asks for browser verification | Run `doctor` again, then `zlib-cli --domain URL login` on a working domain. This client cannot complete browser verification. |
+| Login fails | Check the domain, email and password; `auth-test` tests them without touching the saved session. Repeated logins do not fix a blocked domain. |
+| `The saved session belongs to another domain` | Drop `--domain`, or run `login` on the new domain. |
+| The saved session expired or is refused | Run `login` again on the same domain. A temporary network failure leaves the session intact. |
+| Another process changed the saved session | Check `status` before repeating `login` or `logout`. |
+| No downloads remaining | Check `quota` and wait until your daily limit renews. |
+| A list item may have used quota | Check the folder and `zlib-cli history`, then run once with `--retry-uncertain`. |
+| A book cannot be saved | Use an existing, writable folder with free space on a drive with hard links: NTFS and common Linux file systems work, FAT32 and exFAT (many USB sticks and SD cards) do not. Very long Windows folder paths can also fail. |
+| The terminal interface cannot connect | Start a signed-in `zlib-cli serve` first, then see [TUI troubleshooting](docs/tui.md#troubleshooting). |
 
-Use `zlib-cli --help` or `zlib-cli COMMAND --help` for the available options.
-For more context on diagnostics and errors, see the [reference](docs/reference.md).
+Run `zlib-cli --help`, or add `--help` after any command, to see every option.
 
-## Where the project is going
+## Status and roadmap
 
-The next steps focus on your library and reading lists:
+Version 0.1.0: everything described above works today. Planned, without dates:
 
-- **Booklists:** move selections between lists, import/export their contents and
-  browse public lists. Creating, editing, deleting and adding or removing books
-  are available.
-- **Reading queues:** list downloads are available in the CLI and Python; the
-  HTTP API and the TUI will accept lists next.
-- **TUI:** add search, collection editing and account views to the available
-  favorites, booklists, history and book-detail views.
-- **Queue views:** bring live task updates into the TUI and add a feed for the
-  whole queue. Per-task SSE updates, polling and file retrieval are available.
-- **Uploads:** send a book with its metadata and track its processing, once the
-  service's upload flow and destination visibility have been verified.
+- Booklists: moving books between lists, import and export, browsing public lists.
+- Reading lists through the HTTP API and the terminal interface (today: CLI and Python only).
+- In the terminal interface: search, collection editing, account views and live download-task
+  updates (today it only browses).
+- The website's full My Library page, browsable and searchable by tag.
+- HTTP login and logout, a live feed for the whole download queue, resuming partial downloads.
+- Uploads, once Z-Library's upload flow has been checked.
 
-These additions are planned. The collections TUI, interactive shell and HTTP
-server are available now.
+Not supported: formats other than PDF, EPUB and DjVu, files over 256 MiB, browser verification, HTTP
+API connections from other machines, paging or filters for `popular`, `similar` and `recommended`, a
+recent-additions view, and deleting download tasks or importing a booklist into the queue.
+
+## Documentation
+
+- [Technical reference](docs/reference.md): CLI rules in detail, the Python API, list and
+  progress-file formats, safeguards.
+- [HTTP API](docs/http-api.md), [download tasks](docs/download-tasks.md) and the
+  [collections TUI](docs/tui.md).
 
 ## Development
 
-The core package has no runtime dependencies. The optional TUI uses Textual.
-Install it to include the terminal navigation tests, then run the suite:
+The core package has no runtime dependencies; the terminal interface uses Textual. Without that
+extra, its tests are skipped.
 
 ```sh
 python -m pip install -e ".[tui]"
 python -m unittest discover -s tests -q
 ```
 
-Without the extra, core tests still run and TUI tests are skipped.
-
-GitHub Actions runs the offline tests on Windows and Linux with Python 3.11 and
-3.14, with the TUI extra installed. It also checks the installed CLI outside the source
-folder. These checks do not use a Z-Library account or contact its servers.
-CI runs for code, tests, packaging or workflow changes in pull requests; newer
-pushes cancel obsolete runs. Merging the tested branch does not rerun the suite
-on `main`. Documentation-only changes skip CI; a manual run remains available.
-
-The [technical reference](docs/reference.md) covers protocol behavior, file
-validation and recorded compatibility checks. Z-Library's endpoints and domains
-can change, so a successful check is specific to its date and network.
+The tests are offline: they use synthetic accounts and never contact Z-Library. GitHub Actions runs
+them, with the extra, on Windows and Linux with Python 3.11 and 3.14, and checks the installed
+`zlib-cli` outside the source folder. CI runs for pull requests that change code, tests, packaging
+or the workflow (a newer push cancels the older run) and on demand. Documentation-only changes skip
+it, and merges do not rerun it on `main`.

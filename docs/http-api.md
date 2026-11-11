@@ -45,6 +45,22 @@ or HTTPS origins, without paths or wildcards. Allowed CORS preflights return
 only permitted methods and headers and never access the account; actual requests
 still need the bearer token.
 
+For example, read your Z-Library download history from Python while a signed-in
+server runs with the default token file:
+
+```python
+from urllib.request import Request, urlopen
+from zlib_connector.local_state import state_directory
+
+token = (state_directory() / "api-token").read_text().strip()
+request = Request(
+    "http://127.0.0.1:8000/v1/history?page=1&limit=20",
+    headers={"Authorization": f"Bearer {token}"},
+)
+with urlopen(request) as response:
+    print(response.read().decode())
+```
+
 ## Routes
 
 All routes are under `/v1`. Search and collection pages return

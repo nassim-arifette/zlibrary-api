@@ -38,6 +38,13 @@ server's selected domain. The response is HTTP 202 and a task object. Its `id`
 is a 32-character lowercase hexadecimal identifier. Use that ID with
 `GET /v1/downloads/{task_id}` or `zlib-cli jobs show TASK_ID --json`.
 
+From the command line, `zlib-cli jobs add ID:HASH --key KEY` submits a book;
+`--key` is required and is the request key described below. `jobs list` prints
+each task's ID, state and reference, and `jobs cancel` with that ID requests
+cancellation. `jobs` uses `http://127.0.0.1:8000/v1` and the default token file;
+for another server, put its options before the action, as in
+`zlib-cli jobs --api-url http://127.0.0.1:8080/v1 --token-file PATH list`.
+
 The request key must contain 8 to 128 ASCII letters, digits, dots, underscores,
 tildes or hyphens. The server persists it before acknowledging the request or
 contacting Z-Library. Reusing it with the same normalized reference returns the
