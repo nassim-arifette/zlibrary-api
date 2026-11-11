@@ -129,30 +129,30 @@ def _refresh_timeout(connection, deadline, cancel=None, *, sock=None):
 def _header(response, name):
     values = response.headers.get_all(name, [])
     if len(values) > 1:
-        raise DownloadError("The response contains ambiguous transfer headers.")
+        raise DownloadError("The response contains ambiguous transfer headers.", reason="protocol")
     return response.getheader(name)
 
 
 def _body_length(response, limit, *, download):
     encoding = _header(response, "Content-Encoding")
     if encoding is not None and encoding.strip().lower() != "identity":
-        raise DownloadError("Encoded responses are not supported.")
+        raise DownloadError("Encoded responses are not supported.", reason="protocol")
     transfer = _header(response, "Transfer-Encoding")
     if transfer is not None and transfer.strip().lower() != "chunked":
-        raise DownloadError("The response uses an unsupported transfer encoding.")
+        raise DownloadError("The response uses an unsupported transfer encoding.", reason="protocol")
     length = _header(response, "Content-Length")
     if transfer is not None and length is not None:
-        raise DownloadError("The response contains ambiguous transfer headers.")
+        raise DownloadError("The response contains ambiguous transfer headers.", reason="protocol")
     if download and (response.status == 206 or _header(response, "Content-Range") is not None):
-        raise DownloadError("The server returned a partial download without a range request.")
+        raise DownloadError("The server returned a partial download without a range request.", reason="protocol")
     if length is None:
         return None
     length = length.strip()
     if not re.fullmatch(r"[0-9]{1,12}", length):
-        raise DownloadError("The response contains an invalid content length.")
+        raise DownloadError("The response contains an invalid content length.", reason="protocol")
     length = int(length)
     if length > limit:
-        raise DownloadError("The response exceeds the configured size limit.")
+        raise DownloadError("The response exceeds the configured size limit.", reason="size_limit")
     return length
 
 
@@ -163,9 +163,9 @@ def _write_chunk(target, chunk, cancel=None):
         try:
             written = target.write(remaining)
         except OSError:
-            raise DownloadError("Could not write downloaded data to the local destination.") from None
+            raise DownloadError("Could not write downloaded data to the local destination.", reason="local_write") from None
         if type(written) is not int or not 0 < written <= len(remaining):
-            raise DownloadError("The local destination did not accept the downloaded data.")
+            raise DownloadError("The local destination did not accept the downloaded data.", reason="local_write")
         remaining = remaining[written:]
         _check_cancel(cancel)
 
@@ -410,7 +410,7 @@ class Transport:
                 break
             count = received + len(chunk)
             if count > limit:
-                raise DownloadError("The response exceeds the configured size limit.")
+                raise DownloadError("The response exceeds the configured size limit.", reason="size_limit")
             if total is not None and count > total:
                 raise NetworkError("The response body does not match its declared length.")
             _write_chunk(target, chunk, cancel)

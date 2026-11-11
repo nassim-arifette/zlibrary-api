@@ -191,7 +191,7 @@ class Client:
                 raise AuthenticationError("The book page moved to another domain. Reconnect using that domain.")
             parsed = parse_html(response.body, self.domain)
             if not parsed.download_link:
-                raise DownloadError("No download link available. Check account quota, session or site changes.")
+                raise DownloadError("No download link available. Check account quota, session or site changes.", reason="no_link")
             self._transport.download_to(urljoin(response.url, parsed.download_link), output,
                                         progress=progress, cancel=token)
 

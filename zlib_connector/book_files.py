@@ -1,5 +1,6 @@
 """Bounded book validation and atomic publication, independent of the API client."""
 from contextlib import contextmanager
+import errno
 import io
 import os
 from pathlib import Path
@@ -103,7 +104,7 @@ def validate_book_stream(stream: BinaryIO, extension: str) -> None:
             EOFError, ValueError, struct.error, zlib.error):
         pass
     if not valid:
-        raise DownloadError(_INVALID_BOOK)
+        raise DownloadError(_INVALID_BOOK, reason="invalid_book")
 
 
 def validate_book(data: bytes, extension: str) -> None:
@@ -116,7 +117,30 @@ def _file_errors():
     try:
         yield
     except OSError:
-        raise DownloadError(_SAVE_ERROR) from None
+        raise DownloadError(_SAVE_ERROR, reason="save_failed") from None
+
+
+def _name_limit(folder: Path) -> int | None:
+    """The folder's file name limit in bytes on POSIX; None on Windows, where 90 characters always fit."""
+    if os.name == "nt":
+        return None
+    try:
+        limit = os.pathconf(folder, "PC_NAME_MAX")
+    except (AttributeError, OSError, ValueError):
+        return 255
+    return limit if isinstance(limit, int) and limit > 0 else 255
+
+
+def _file_stem(title: str, suffix: str, limit: int | None) -> str:
+    """At most 90 characters of the title; on POSIX also shortened, by whole code points, until
+    the name with ``suffix`` fits ``limit`` bytes (long CJK or emoji titles exceed 255 bytes)."""
+    stem = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '_', title)[:90].strip(' .') or "book"
+    if limit is not None:
+        room = limit - len(suffix.encode("utf-8"))
+        while stem and len(stem.encode("utf-8", "surrogatepass")) > room:
+            stem = stem[:-1]
+        stem = stem.strip(' .') or "book"
+    return stem
 
 
 def save_book(title: str, extension: str, folder: Path, writer: Callable[[BinaryIO], None], *,
@@ -129,7 +153,7 @@ def save_book(title: str, extension: str, folder: Path, writer: Callable[[Binary
     a file already published is a completed download and is never removed here.
     """
     if extension not in ("pdf", "epub", "djvu"):
-        raise DownloadError(_INVALID_BOOK)
+        raise DownloadError(_INVALID_BOOK, reason="invalid_book")
     if not isinstance(title, str):
         raise ValueError("The book title must be text.")
     if cancel is not None:
@@ -140,7 +164,7 @@ def save_book(title: str, extension: str, folder: Path, writer: Callable[[Binary
         with _file_errors():
             folder = Path(folder).resolve(strict=True)
             if not folder.is_dir():
-                raise DownloadError(_SAVE_ERROR)
+                raise DownloadError(_SAVE_ERROR, reason="save_failed")
             output = tempfile.NamedTemporaryFile(mode="w+b", dir=folder, prefix=".zlib-", suffix=".part", delete=False)
             temporary = Path(output.name)
         if cancel is not None:
@@ -153,12 +177,19 @@ def save_book(title: str, extension: str, folder: Path, writer: Callable[[Binary
             validate_book_stream(output, extension)
             os.fsync(output.fileno())
             output.close()
-        stem = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '_', title)[:90].strip(' .') or "book"
-        target = folder / f"{stem}-{uuid.uuid4().hex[:12]}.{extension}"
+        suffix = f"-{uuid.uuid4().hex[:12]}.{extension}"
+        target = folder / (_file_stem(title, suffix, _name_limit(folder)) + suffix)
         if cancel is not None:
             cancel.check()
         with _file_errors():
-            os.link(temporary, target)
+            try:
+                os.link(temporary, target)
+            except OSError as error:
+                if error.errno != errno.ENAMETOOLONG:
+                    raise
+                # The link was already paid for: keep the book under a short name rather than lose it.
+                target = folder / ("book" + suffix)
+                os.link(temporary, target)
         return target
     finally:
         if output is not None:
