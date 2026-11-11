@@ -63,7 +63,9 @@ zlib> quit
 ```
 
 `--json` returns successful search/download results on stdout; prompts and failures
-use stderr. Exit status is 0 on success, 1 on failure, 130 on interruption.
+use stderr. Exit status is 0 on success, 1 on failure, 2 for a command-line usage
+error and 130 on interruption. Batch downloads add 3 and 4 (see
+[Batch downloads](#batch-downloads)).
 Optionally install the console entry point with `python -m pip install -e .` and
 use `zlib-cli` with the same arguments. Installation is not needed for `python -m`.
 
@@ -262,6 +264,15 @@ Interrupted partial files are removed; byte-range resume remains planned.
 For persistent tasks, progress polling and file retrieval through Python, HTTP
 or the CLI, see [download tasks](download-tasks.md).
 
+`DownloadError.reason` names its cause without parsing messages: `unavailable`,
+`no_link` and `refused` (the service declined the link request), `format_mismatch`,
+`protocol`, `size_limit`, `invalid_book`, `local_write`, `save_failed`, or the
+generic `download`. Messages and classes are unchanged. An exception raised by
+`Client.download()` after it sent the quota-using link request carries
+`download_stage`: `link` while that request was pending, `transfer` once a link was
+issued (transfer, validation and publication). Its absence means no link was
+requested, so no quota was used.
+
 `Transport.download_to(url, binary_stream, progress=None, cancel=None)` is the
 lower-level streaming operation and returns the number of received bytes. It
 does not own, validate or publish the destination stream. It shares the HTTPS,
@@ -278,6 +289,309 @@ headers work when the central sizes are bounded; ZIP64 end records and
 multi-volume archives are currently rejected. Book payloads are never read
 entirely into memory for this validation. Other EPUB resources are not unpacked
 or checked for full semantic correctness.
+
+## Batch downloads
+
+`download` keeps its single-book flow, prompts and `{"path": ...}` JSON for exactly
+one query without list options. Several queries, `-a/--batch-file FILE` (`-` reads
+standard input) or any list option selects batch mode: `--batch-format`,
+`--dry-run`, `--report FILE`, `--no-report`, `--yes`, `--interactive`,
+`--retry-uncertain`, `--redownload-missing` or `--max-downloads N`. Titles may
+follow options; titles and `-a` cannot be combined. In batch mode `--limit` is the
+number of candidates per search (default 5, at most 50), `--page` is refused and
+`--pick` must not exceed `--limit`. Every option, the list, the output folder and
+an existing report are checked before a request is sent, and before credentials
+are read except with `-a -`. A missing `--yes` is refused before anything is
+read. `-a -` checks for a saved session or an email in the credentials file
+before it reads standard input, so a refusal does not consume the list. A list
+that is the credentials file itself (the default one or `--credentials FILE`) is
+refused without being read.
+
+A run is **interactive** when stdin and stderr are terminals (or `--interactive`
+is given) and the list is not read from standard input; on Windows a terminal is
+a console, so a `NUL` redirect does not count as one. Candidates, the plan
+summary, the confirmation and progress use stderr, so stdout can be redirected.
+The prompt `Choose 1-N, s to skip, q to stop:` asks again after an invalid answer;
+end of input counts as `q`. `q` stops choosing: items that need no choice are
+still resolved, then the confirmation `Download N books into FOLDER? [y/N]`
+states the quota (`Download N of M books` when `--max-downloads` is lower). A
+non-interactive download requires `--yes`, and `--pick N`
+when an item needs a search result choice; `-a -` also requires a saved session
+or an email in the credentials file, because the list occupies standard input.
+
+### List formats
+
+Lists are UTF-8 with or without a byte-order mark, or UTF-16 with one (Windows
+PowerShell 5.1 redirection writes it). Line ends may be LF, CRLF or CR. A list
+holds at most 16 MiB and 1000 items. `--batch-format` selects the format, else
+the suffix `.txt`, `.csv`, `.tsv` or `.json`; otherwise JSON is assumed when the
+text starts with `[` or `{`, and text otherwise. Text whose first line is a CSV
+header, or a single column name such as `Title`, `ISBN` or `Author`, is refused
+unless `--batch-format txt` is given, and so is text that holds JSON, such as a
+plan saved as `plan.txt`: its first line is a lone `[` or `{`, or the whole text
+parses as JSON. Name it `.json` or use `--batch-format json`; titles such as
+`[Graphic novel] Maus` stay searches. Invalid encoding, NUL characters, a CSV
+header without a usable column, a CSV quote that is never closed, a text line
+that sets `email` or `password` (a credentials file), JSON syntax, JSON nested
+deeper than 32 levels and the size limits reject the whole list; any other problem
+turns that one entry into an
+`error` that names its line or item.
+
+| Input | Items |
+| --- | --- |
+| Text | One per line. Blank lines and lines starting with `#` are skipped, ignoring invisible characters such as a byte-order mark; put a title starting with `#` in a CSV or JSON list. |
+| CSV | A header row, then one item per row. Delimiter: tab for `.tsv`; otherwise comma, semicolon or tab, found in the header, and a header without any of them is one column. A row with more cells than the header, or a used value that spans several rows, is an item error: quote values that contain the delimiter. |
+| JSON | An array, or an object with an `items` or `books` array, of strings or objects. |
+| Plan or report | A document written by this command; see below. |
+
+A value with `://`, or digits and a colon without spaces, must be an `ID:HASH`
+reference or an http(s) `/book/ID/HASH` URL from any mirror. Only its ID and hash
+are kept and used with the selected domain; an invalid one is an error, never a
+search. Everything else is a search: whitespace is collapsed, text is NFC
+normalized, invisible format characters other than zero-width (non-)joiners are
+removed, control characters make the item an error, and 1 to 500 characters are
+allowed. `2001: A Space Odyssey` is a search; `123:ab12/` is an invalid reference.
+
+CSV headers and JSON keys are case-insensitive: `query`; `title` (a trailing
+series marker such as `(The Expanse, #1)` is removed); `author` or `authors`;
+`isbn`, `isbn13`, `isbn10` or `isbn/uid` (`="..."` spreadsheet wrappers are
+removed, separators dropped and checksums required; a number in scientific
+notation is an error); `reference`, `url`, or `book_id` with `book_hash`;
+`extension`; `format`, used only when its values are pdf, epub or djvu; and
+`language`. Several values can be separated by `,`, `;` or `|`. A reference wins
+over search fields, and a `url` counts only when it is a book URL. The search is
+`query`, else `title` plus `author`, else the first valid ISBN. Empty cells are
+absent and blank rows skipped. Other columns are ignored and listed once on
+stderr; the PowerShell `#TYPE` line is skipped. Per-row `extension`/`format` and
+`language` replace the batch filters field by field; year and order filters are
+inherited. Filters apply only to searches; a reference outside an explicit
+`--format` is downloaded as is, with a note in the plan.
+
+### Planning
+
+An item's identity is its reference, or its query (NFC, case-folded, whitespace
+collapsed) with its effective filters. A repeated identity is a `duplicate` of
+the first item without another search; a second item resolving to an edition
+already chosen is one too (`duplicate_of` is the first item's index). References
+are confirmed with `get_book()`; formats other than PDF, EPUB and DjVu are errors.
+Searches read page 1. With `--pick N`, an item with fewer than N results is
+`not_found`. Without a terminal and without `--pick`, `--dry-run` records
+`needs_choice` items with their candidates. Each lookup starts at least 0.5
+seconds after the previous one ended, as politeness rather than a retry; time
+spent at a prompt counts toward the pause.
+
+Authentication, browser-verification, rate-limit and network errors stop
+planning; two protocol errors in a row do too, while a single one is an item error.
+The rest is then resolved only from the report without requests, and nothing is
+downloaded. The choices made so far are saved in the report, unless the run is a
+dry run or the confirmation is declined; declining leaves an existing report
+byte for byte unchanged.
+
+### Downloading
+
+The output folder must accept a hard link and a file named like the longest book
+file (108 characters), so FAT32 and exFAT drives, and on Windows folder paths too
+long for book names, fail before any request. On Linux and macOS, where names are
+limited in bytes (usually 255), a long title in a script such as Chinese or
+Japanese is shortened by whole characters until the name fits; the single-book
+download names its files the same way. The report is written before the first
+download. For each planned book, the
+quota is read first: a confirmed zero stops with the rest `waiting_quota`; missing
+counters are unknown and do not block; a failed read stops the batch with nothing
+requested. An edition taken from a plan or report is confirmed with `get_book()`.
+The report then marks the item `downloading` before `Client.download()` streams,
+validates and publishes the file as usual. The quota is refreshed at the end,
+except after a cancellation or a refused session: no request is made then, and
+the report's `quota` is null when a download was requested since the last read,
+so no stale count is shown.
+
+| Failure | This item | Rest |
+| --- | --- | --- |
+| Quota read failed, or the edition check could not be made (network, session refused, verification, rate limit) | `not_started` (`waiting_quota` for a rate limit) | the same; nothing is requested |
+| Edition check rejected the edition (not PDF, EPUB or DjVu, not valid for this domain, unexpected response or API refusal) | `error`, no quota used; checked again next run | continue; see below |
+| Link refused: rate limit | `waiting_quota` | `waiting_quota` |
+| Link refused: unavailable or no link | `error` if the quota is still above zero, else `waiting_quota` | continue, or `waiting_quota` |
+| Network, verification or protocol error after the link request | `error`, quota may be used | `not_started` |
+| Local save failure (disk, permissions, hard links) | `error`, quota may be used; `not_started` when it failed before the link request | `not_started` |
+| Invalid file, or a format other than the listed one (`FormatMismatch`) | `error`, quota may be used | continue; see below |
+| File over the 256 MiB limit | `error` `TooLarge`, quota may be used; never requested again, even with `--retry-uncertain` | continue |
+| First Ctrl+C, or a cancelled `stop` token | finishes and is recorded | `not_started` |
+| Second Ctrl+C, or a cancelled `cancel` token | `cancelled`, quota may be used once the link was requested | `not_started` |
+| Report write failure | stops before the next request | `not_started` |
+
+A rejected edition, an invalid file and a format mismatch count as failures: a
+second one before another book is downloaded stops the batch with the rest
+`not_started`. An edition that is not PDF, EPUB or DjVu, or a file over the size
+limit, never stops it.
+
+`quota_may_be_used` is true when the link request may have been honored: the
+item is never retried automatically, in this run or a later one, unless
+`--retry-uncertain` (`retry_uncertain=True`) is given. That option releases the
+attempts recorded before the run. A new uncertain failure in such a run says that
+the option would request it again, and the advice is to run the command again
+without it. A released item that the run does not reach stays uncertain. A
+`TooLarge` edition is never released: the same file would fail again, so it stays
+an error, and any item that resolves to that edition is one too, without a
+request. Running the list again keeps it; to get another edition, replace the
+item with that edition's `ID:HASH`, or reword its search, for example by adding
+the author. Either changes the item's identity, while a change of case or spacing
+alone does not. In the
+CLI, the first Ctrl+C lets the current book finish and be recorded, then stops
+(a press before its link request uses no quota); a second one cancels that
+download at its next check, after a pending request or chunk; a third one stops
+at once. `--max-downloads N` stops after N attempts with the rest `not_started`.
+
+### Reports
+
+With `-a FILE`, the report defaults to `FILE` without its suffix plus
+`.progress.json`, beside the list; a report given with `-a` is its own report.
+A plan given with `-a`, including `-a -`, has no default report: downloading it
+needs `--report FILE` or `--no-report`. Pass the list's report, which the dry run
+names on stderr, so that later runs of the list know what the plan downloaded. A
+report piped with `-a -` needs them too; give it with `-a FILE` to continue it.
+`--report FILE` chooses another file in an existing folder and `--no-report`
+disables it. Titles and standard input have no default report. Without a report
+and without `--no-report`, a non-interactive run stops before downloading when
+the known quota cannot cover the planned books (or is unknown), or when
+`--max-downloads` is lower than their number, because a later run would download
+the finished books again; an interactive confirmation warns. When a run without a
+report stops early after downloading or attempting a book, its last lines name
+the items still waiting, to be run again on their own. A run
+holds `REPORT.lock` beside the report for its whole duration; a second run fails
+immediately. The lock file stays empty and needs no private permissions, so
+copied, synced and shared folders work; where files cannot be locked, choose a
+`--report` file in a local folder or add `--no-report`. Dry runs only read the
+report, take no lock, and say that nothing was written. Each write creates a temporary file in
+the same folder, fsyncs it, then replaces the report atomically, waiting up to two
+seconds on a Windows sharing violation. The JSON is UTF-8 with ASCII escapes. Book
+files are stored by bare file name, with the output folder in `folder`. Reports
+contain no tokens, cookies, signed links or credentials, and messages come from a
+fixed table.
+
+A report is read strictly (32 MiB and 10,000 entries at most, duplicate keys,
+nesting deeper than 32 levels, unknown fields and invalid values refused); an
+invalid report, a plan or any other
+JSON is refused and never overwritten. On the next run, each item is matched by
+identity before any search or prompt:
+
+- recorded downloads whose files exist become `already_downloaded` with no request;
+  missing files, and downloads recorded with a null `path`, stay
+  `already_downloaded` unless `--redownload-missing`;
+- a recorded file is looked up by its name in the current output folder only
+  (`--output`, or `folder=` in Python), never in the document's `folder` or as
+  written; a `path` that is not a plain file name (with a folder, drive, UNC or
+  device part) is never opened and counts as missing;
+- when the report's `folder` is another folder and none of its recorded books is
+  in the output folder, a non-interactive download stops before any request and
+  names that folder (pass it with `--output`); a dry run or a terminal run says so
+  on stderr and goes on, and the advice for the missing files is that folder, not
+  `--redownload-missing`. The report keeps its `folder` until a book is found or
+  downloaded in the new one;
+- skips stay skipped; chosen editions are reused without searching or asking;
+- `downloading` entries become `interrupted`; they and other attempts that may have
+  used quota are kept, unless `--retry-uncertain`;
+- `not_found` items, errors before any link request and new lines are resolved again.
+
+Entries matching no current item move to `previous` and still count as known
+downloads. The document is `{kind, version: 1, created_at, updated_at, folder,
+quota, stopped, summary, items, previous}`, where `kind` is
+`zlib-connector-batch-report`, `quota` is `{limit, used, remaining}` or null,
+`stopped` is `{error_code, message}` or null and `summary` counts non-zero statuses.
+A `--dry-run --json` plan has the same shape with `kind:
+zlib-connector-batch-plan` and no `previous`. Each item is:
+
+```json
+{"index": 1, "position": "line 3",
+ "source": {"query": "dune herbert", "filters": {"formats": ["epub"], "languages": [], "year_from": null, "year_to": null, "order": null}},
+ "status": "downloaded", "reference": "123:ab12",
+ "book": {"reference": "123:ab12", "title": "Dune", "authors": "Frank Herbert", "extension": "epub", "year": "1965", "language": "english", "size": "1 MB"},
+ "path": "Dune-0123456789ab.epub", "duplicate_of": null, "error_code": null, "message": null,
+ "quota_may_be_used": false, "candidates": []}
+```
+
+`source` is `{"reference": "ID:HASH"}` for a reference and null for an invalid
+entry. `reference` is the chosen edition; `book` describes the edition that
+`status`, `path` and `quota_may_be_used` refer to, and `path` is a bare file name
+inside `folder` without control characters. Reading a plan or report back as a
+list uses `reference` or `pick` (1-based, into `candidates`), else `source`;
+`book` is display-only and never searched. To change a choice, edit `reference`
+or add `pick`; to search again, set `reference` to null. This works only for
+items that were not downloaded or attempted: once an item is `downloaded`,
+`already_downloaded`, `downloading`, `interrupted`, `error` `TooLarge`, or
+`error` or `cancelled` with `quota_may_be_used`, a `reference` that differs from
+its `book`, or a `pick`, makes the whole document invalid. To get another edition
+too, add its `ID:HASH` as a new line of the list, or a new item such as
+`{"source": {"reference": "ID:HASH"}, "status": "planned"}`; a copy of the item
+with another `reference` repeats the same search and is skipped as a duplicate.
+Saving a plan over the file being read (`-a plan.json ... > plan.json`) empties it
+before the command starts, and the empty file is refused.
+
+| Status | Meaning | Task state |
+| --- | --- | --- |
+| `downloaded` | Published in this run. | `succeeded` |
+| `already_downloaded` | Recorded earlier; no request. | |
+| `duplicate` | Same request or edition as `duplicate_of`. | |
+| `skipped` | Skipped by a choice; kept on later runs. | |
+| `planned` | Edition chosen, not attempted yet. | `queued` |
+| `needs_choice` | Plans only: choose among `candidates`. | |
+| `not_found` | No result, or fewer than `--pick`. | |
+| `error` | Input or download problem; see `error_code` and `quota_may_be_used`. | `failed` |
+| `waiting_quota` | Not attempted: quota or rate limit. | `waiting_quota` |
+| `not_started` | Not attempted: the batch stopped first. | `queued` |
+| `cancelled` | Cancelled during this item. | `cancelled` |
+| `interrupted` | An earlier attempt may have used quota (a run stopped during it, or it was not retried); kept until `--retry-uncertain`. | `interrupted` |
+| `downloading` | Transient write-ahead state. | `running` |
+
+Batch exit codes: 0 when every item is `downloaded`, `already_downloaded`,
+`duplicate` or `skipped` (`planned` too for a dry run); 3 when the others only wait
+(`waiting_quota`, `not_started`, `planned`) because of the quota, a rate limit,
+`--max-downloads`, a network failure or `q`; 4 when an item is `not_found`, an
+`error`, `needs_choice` or `interrupted`, when the batch stopped on an account,
+verification, protocol, storage or report problem; 130 when cancelled or declined.
+1 still means that the batch could not start, and 2 a usage error.
+
+### Python API
+
+```python
+from pathlib import Path
+from zlib_connector import (Client, SearchFilters, SessionStore, load_report, parse_batch, pick,
+                            plan_batch, run_batch)
+
+items = parse_batch(Path("reading-list.csv"))            # Path: a file; str: list text
+report_path = Path("books/progress.json")
+with Client("https://z-lib.by/") as client:
+    client.restore_session(SessionStore())               # or client.login(email, password)
+    plan = plan_batch(client, items, filters=SearchFilters(formats=("epub",)), choose=pick(1),
+                      previous=load_report(report_path),  # None when the report does not exist
+                      folder="books")                       # where recorded files are looked up
+    report = run_batch(client, plan, "books", report=report_path)
+print(report.summary, report.stopped)
+```
+
+`parse_batch(source, *, kind=None, warn=None)` takes an `os.PathLike` file, list
+text, bytes or a sequence of strings and returns `BatchItem` values (`position`,
+`query`, `reference`, `filters`, plus a plan's `choice` and the recorded outcome:
+`recorded` with its `path`, `uncertain`, `too_large` or `skipped`).
+`plan_batch(client, items,
+*, filters, candidates=5, choose, previous, retry_uncertain, redownload_missing,
+on_item, pause, folder)` returns a `BatchPlan`; `folder` is the output folder where
+recorded file names are looked up (default: the current folder), and `pause` is
+the minimum number of seconds between lookups. Give `run_batch()` the same folder:
+it refuses, before any request, a plan that looked up recorded files in another
+one. `choose(item, books)` returns one of `books`
+or None to skip, and may raise `StopPlanning`; without `choose`, items become
+`needs_choice`. Ctrl+C or `TransferCancelled` returns the partial plan with
+`cancelled` set. `run_batch(client, plan, folder, *, report, progress_factory,
+cancel, on_item, max_downloads, stop)` returns a `BatchReport`; `progress_factory(entry)`
+returns a context manager yielding a progress callback, as `ProgressDisplay` does.
+A cancelled `stop` token lets the current book finish and stops before the next
+one; a cancelled `cancel` token also cancels the current transfer.
+An existing report must be passed to `plan_batch(previous=load_report(path))`
+first. `report_lock(path)` in `zlib_connector.batch` gives the CLI's exclusive lock.
+Plans, reports and their `BatchEntry` items have `to_dict()`. The client is
+synchronous and not thread-safe: `run_batch()` must own it, and must not share it
+with a `DownloadManager` unless it holds that manager's client lock. HTTP and TUI
+support for lists is planned.
 
 ## Account collections
 

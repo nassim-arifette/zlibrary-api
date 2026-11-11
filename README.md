@@ -6,8 +6,8 @@ Search for books, inspect editions, download files and access your favorites,
 booklists and download history.
 
 **Available today:** a Python library, HTTP API, CLI, collections TUI and interactive shell.
-You can manage favorites, booklists and native tags, and read Z-Library's
-download history.
+You can manage favorites, booklists and native tags, read Z-Library's
+download history, and download several books from a list.
 The TUI browses favorites, booklists and download history, with book details.
 Search, collection editing and download management in the TUI are still planned.
 This is an unofficial client.
@@ -100,6 +100,106 @@ zlib-cli --domain https://z-lib.by/ quota
 
 This shows your daily limit, downloads used and downloads remaining. If a counter
 is missing from the response, it appears as `unknown`. Add `--json` for scripts.
+
+## Download several books
+
+Pass several titles, ISBNs or `ID:HASH` references, or a list file with `-a`:
+
+```sh
+zlib-cli download "Dune" "Neuromancer" "9780441013593" --format epub --output books
+zlib-cli download -a reading-list.txt --output books
+zlib-cli download -a reading-list.csv --pick 1 --yes --output books
+```
+
+A **text list** has one title, author, ISBN, `ID:HASH` or book URL per line. Blank
+lines and lines starting with `#` are skipped. A **CSV list** needs a header row
+with a `title`, `query`, `isbn` or `reference` column; `author` is added to the
+title. Other columns, such as those in Goodreads, StoryGraph or Calibre exports,
+are ignored and listed on stderr. A `.tsv` file is read with tabs, and a header
+of one column such as `title` keeps commas inside the titles. Put values that
+contain the delimiter in double quotes. A row's `extension` (or a `format` of pdf, epub
+or djvu) and `language` replace the search filters for that row. **JSON** works too, including the output
+of `search --json`, `favorites --json` or `booklists show ID --json`: their books
+are downloaded as those exact editions, without a new search.
+
+In a terminal, each search shows its first five results on stderr and asks
+`Choose 1-5, s to skip, q to stop`. The command never chooses an edition by
+itself. Without a terminal, `--pick N` takes result N of every search, in the
+order Z-Library returns them, so check that the match is the edition you want.
+An item with fewer results is reported as not found. `q` stops choosing, then
+the plan and `Download N books into FOLDER? [y/N]` follow. Scripts must pass
+`--yes`. Search filters apply only to searches, not to references. A title or
+edition listed twice is downloaded once.
+
+Each book gets a line on stdout with the request, the matched edition and its
+file, followed by a summary. Progress bars and prompts stay on stderr. Add `--json`
+to receive one report object at the end instead.
+
+### Continue a list later
+
+The quota is checked before each download. When no downloads remain, the batch
+stops and the other books wait. For `-a reading-list.csv`, progress is kept in
+`reading-list.progress.json` beside the list; choose another file with
+`--report FILE`, or none with `--no-report`. **Run the same command again** after
+the quota renews: books already downloaded, your choices and your skips are reused,
+and only the rest is searched or downloaded. Titles given on the command line have
+no report unless you add `--report FILE`. Without one, a script stops before
+downloading when the quota or `--max-downloads` may not cover them all;
+`--no-report` downloads what they allow anyway. When a run without a report stops
+early after downloading some books, it names the books still to download: run
+again with only those, because the same command would download the finished books
+a second time.
+
+A download that fails after its link was requested may have used quota. It is
+never retried automatically. Check the folder and your Z-Library download history,
+then add `--retry-uncertain` to try it again; once that run is done, run the list
+again without the option. A book larger than 256 MiB cannot be downloaded by this
+client: it is reported once and never requested again, even with
+`--retry-uncertain`. To get another edition, replace its line with that edition's
+`ID:HASH` (`zlib-cli search` lists them), or reword the search, for example by
+adding the author; a change of case or spacing alone keeps the same line.
+
+The report records books by file name, and they are looked up in the output
+folder, so continue a list with the same `--output`. When none of the books the
+report recorded in another folder is in the output folder, a script stops before
+any request and names that folder; in a terminal the command says so and goes on.
+The report keeps its folder until a book is found or downloaded in the new one. A
+book recorded as downloaded whose file is not there is not downloaded again
+unless you add `--redownload-missing`. `--max-downloads N` keeps part of your
+quota for later.
+
+### Review a plan first
+
+```sh
+zlib-cli download -a reading-list.txt --dry-run --json > plan.json
+zlib-cli download -a plan.json --report reading-list.progress.json --yes --output books
+```
+
+`--dry-run` searches without downloading anything or writing the report, and the
+choices it shows are kept only in the `--json` plan. Items that still need a
+choice list their candidates; set `"pick": 2` or a `"reference"` in `plan.json`.
+To check your edits, dry-run the plan without `--json`: redirecting a command's
+output into the file it reads empties that file first. Downloading the plan reuses
+its editions without searching again. It needs `--report FILE` or `--no-report`,
+also when it is piped with `-a -`: pass the list's progress file, as above, so
+that running the list again knows what the plan downloaded. An item that was
+already downloaded or attempted keeps its edition. To get another edition too, add
+its `ID:HASH` as a new line of the list, or a plan item whose `source` is
+`{"reference": "ID:HASH"}`; a copy of the item would be skipped as a duplicate.
+
+The command exits with **0** when every book is downloaded, already present, a
+duplicate or skipped, **3** when books only wait (quota, `--max-downloads` or a
+temporary failure; run it again later), **4** when items need attention (not found,
+errors, uncertain downloads, missing choices) and **130** when cancelled. Press
+Ctrl+C once to stop after the current book, twice to cancel that book's download
+too (its quota may already be used), and three times to stop at once.
+
+In PowerShell, pass the list with `-a FILE` rather than piping it, and check
+`$LASTEXITCODE` in scripts. `-a -` reads the list from standard input; it needs a
+saved session from `zlib-cli login`. Large PDFs may need a longer `--timeout`, up
+to 300 seconds. The [reference](docs/reference.md#batch-downloads) describes every
+format, status and report field. For a queue that keeps running in the background,
+see [Run downloads through the API](#run-downloads-through-the-api).
 
 ## Browse in the terminal
 
@@ -432,8 +532,8 @@ The next steps focus on your library and reading lists:
 - **Booklists:** move selections between lists, import/export their contents and
   browse public lists. Creating, editing, deleting and adding or removing books
   are available.
-- **Reading queues:** import a list, choose editions, skip duplicates and follow
-  downloads with progress, cancellation and resume where supported.
+- **Reading queues:** list downloads are available in the CLI and Python; the
+  HTTP API and the TUI will accept lists next.
 - **TUI:** add search, collection editing and account views to the available
   favorites, booklists, history and book-detail views.
 - **Queue views:** bring live task updates into the TUI and add a feed for the

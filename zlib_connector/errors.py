@@ -20,7 +20,12 @@ class NetworkError(ConnectorError):
         self.reason = reason
 
 class DownloadError(ConnectorError):
-    pass
+    """``reason`` is a stable cause: unavailable, no_link, refused, format_mismatch,
+    protocol, size_limit, local_write, invalid_book, save_failed or download."""
+
+    def __init__(self, message: str = "", *, reason: str = "download"):
+        super().__init__(message)
+        self.reason = reason
 
 
 class MutationUncertainError(ConnectorError):

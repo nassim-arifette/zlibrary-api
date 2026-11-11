@@ -10,6 +10,7 @@ from .cli_progress import add_progress_options
 from .cli_session import add_session_options
 from .cli_jobs import add_jobs_parser
 from .cli_tui import add_tui_parser
+from .cli_batch import add_batch_options
 
 LIBRARY_COMMANDS = ("library", "favorites", "history", "booklists", "tags")
 DISCOVERY_COMMANDS = ("similar", "popular", "recommended")
@@ -28,22 +29,28 @@ def parser() -> argparse.ArgumentParser:
     add_tui_parser(commands)
     for name in ("search", "download"):
         command = commands.add_parser(name)
-        command.add_argument("query", help="title, author or ISBN; download also accepts ID:HASH or a book URL")
+        if name == "search":
+            command.add_argument("query", help="title, author or ISBN")
+        else:
+            command.add_argument("query", nargs="*", help="titles, authors, ISBNs, ID:HASH references or book URLs;"
+                                 " one value without list options downloads a single book")
         command.add_argument("--format", choices=SUPPORTED_FORMATS, action="append", help="format filter; repeat for multiple formats")
         command.add_argument("--language", action="append", help="language filter, e.g. french; repeat for multiple languages")
         command.add_argument("--year-from", type=int)
         command.add_argument("--year-to", type=int)
         command.add_argument("--order", choices=SEARCH_ORDERS)
-        command.add_argument("--page", type=int, default=1)
-        command.add_argument("--limit", type=int, default=20)
+        command.add_argument("--page", type=int, default=1 if name == "search" else None)
+        command.add_argument("--limit", type=int, default=20 if name == "search" else None,
+                             help=None if name == "search" else "results per search (default: 20; 5 per item for a list)")
         command.add_argument("--json", action="store_true", help="machine-readable stdout; prompts stay on stderr")
         if name == "search":
             command.add_argument("--with-pagination", action="store_true", help="with --json, return books and pagination metadata")
             command.add_argument("--anonymous", action="store_true", help="search without loading or sending credentials")
         if name == "download":
             add_progress_options(command)
-            command.add_argument("--pick", type=int, help="1-based result number; otherwise prompt")
+            command.add_argument("--pick", type=int, help="1-based result number for every search; otherwise prompt")
             command.add_argument("--output", type=Path, default=Path.cwd(), help="existing destination directory")
+            add_batch_options(command)
     for name in ("info", "formats"):
         command = commands.add_parser(name)
         command.add_argument("reference", help="ID:HASH or a book HTTPS URL on the selected domain")

@@ -18,6 +18,7 @@ from .http_cli import run_server
 from .cli_jobs import run_jobs
 from .cli_tui import run_tui
 from .cli_progress import ProgressDisplay
+from .cli_batch import is_batch, run_batch_command
 from .cli_session import AccountSession, local_session_command, session_message
 from .transfer import TransferCancelled
 from .cli_parser import BOOKLIST_MUTATIONS, CATALOG_COMMANDS, DISCOVERY_COMMANDS, LIBRARY_COMMANDS, parser
@@ -86,8 +87,22 @@ def shell(client: Client, *, progress=None):
             print(f"{type(error).__name__}: {error}", file=sys.stderr)
 
 def main(argv: list[str] | None = None) -> int:
-    args = parser().parse_args(argv)
+    command_parser = parser()
+    args, extras = command_parser.parse_known_args(argv)
+    if extras:
+        # Titles may follow options: download "Dune" --format epub "Neuromancer".
+        if args.command != "download" or any(value.startswith("-") for value in extras):
+            command_parser.error("unrecognized arguments: " + " ".join(extras))
+        args.query = [*args.query, *extras]
     try:
+        if args.command == "download":
+            if is_batch(args):
+                return run_batch_command(args, client_factory=Client, credentials_loader=load_credentials,
+                                         prompt=prompt,
+                                         password_prompt=lambda label: getpass.getpass(label, stream=sys.stderr))
+            args.query = args.query[0]
+            args.page = 1 if args.page is None else args.page
+            args.limit = 20 if args.limit is None else args.limit
         if args.command == "tui":
             run_tui(args)
             return 0

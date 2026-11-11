@@ -71,7 +71,7 @@ class Client(HtmlClient):
                 raise RateLimitError("The account download quota or request limit was reached.")
             if "auth" in error or "login" in error or "password" in error:
                 raise AuthenticationError("The API refused the session. Reconnect to the selected domain.")
-            raise DownloadError("The API refused this operation.")
+            raise DownloadError("The API refused this operation.", reason="refused")
         return value
 
     def _confirm_authentication(self) -> None:
@@ -347,18 +347,23 @@ class Client(HtmlClient):
         if not isinstance(file, dict):
             raise FormatChangedError("The API response has no download information.")
         if file.get("allowDownload") in (False, 0, "0"):
-            raise DownloadError("Download is unavailable for this account or its current quota.")
+            raise DownloadError("Download is unavailable for this account or its current quota.", reason="unavailable")
         link = file.get("downloadLink")
         if not isinstance(link, str) or not link:
-            raise DownloadError("The API did not issue a download link. Check the account quota.")
+            raise DownloadError("The API did not issue a download link. Check the account quota.", reason="no_link")
         actual_format = str(file.get("extension") or book.extension).lower()
         if actual_format != book.extension:
-            raise DownloadError("The download format differs from the selected book.")
+            raise DownloadError("The download format differs from the selected book.", reason="format_mismatch")
         return urljoin(self.domain, link)
 
     def download(self, book: Book | str, destination: str | Path = ".", *,
                  progress: ProgressCallback | None = None, cancel: CancellationToken | None = None) -> Path:
-        """Stream and validate an exact edition, then publish it without overwriting."""
+        """Stream and validate an exact edition, then publish it without overwriting.
+
+        An exception raised once the quota-using link request was sent carries
+        ``download_stage``: ``link`` while requesting the link, ``transfer`` after
+        a link was issued. Without that attribute, no link was requested.
+        """
         token = self._download_token(progress, cancel)
         self._require_login()
         folder = Path(destination).resolve(strict=True)
@@ -366,12 +371,24 @@ class Client(HtmlClient):
             raise ValueError("The download destination must be an existing directory.")
         book = self._download_book(book)
         token.check()
+        stage = None
 
         def receive(output):
+            nonlocal stage
             token.check()
             # Opening the local file succeeds before requesting a quota-consuming link.
+            stage = "link"
             link = self._download_link(book)
+            stage = "transfer"
             token.check()
             self._transport.download_to(link, output, progress=progress, cancel=token)
 
-        return save_book(book.title, book.extension, folder, receive, cancel=token)
+        try:
+            return save_book(book.title, book.extension, folder, receive, cancel=token)
+        except BaseException as error:
+            if stage is not None:
+                try:
+                    error.download_stage = stage
+                except AttributeError:
+                    pass
+            raise

@@ -1,12 +1,15 @@
+import errno
 import io
+import os
 from pathlib import Path
 import struct
+import sys
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
 import zipfile
 
-from zlib_connector.book_files import save_book, validate_book, validate_book_stream
+from zlib_connector.book_files import _file_stem, save_book, validate_book, validate_book_stream
 from zlib_connector.errors import DownloadError, NetworkError
 
 
@@ -175,6 +178,44 @@ class BookPublicationTests(unittest.TestCase):
         self.assertEqual(writer.call_count, 1)
         self.assertEqual(existing.read_bytes(), b"existing")
         self.assertEqual(list(self.folder.iterdir()), [existing])
+
+    def test_long_titles_fit_a_name_limit_in_bytes_by_whole_characters(self):
+        suffix = "-0123456789ab.djvu"
+        han, emoji, accent = "\u6f22", "\U0001f600", "\u00e9"
+        for title, kept in ((han * 90, 79), (emoji * 90, 59), (accent * 90, 90), ("A" * 90, 90)):
+            with self.subTest(title=title[:1]):
+                stem = _file_stem(title, suffix, 255)
+                self.assertEqual(stem, title[:kept])
+                self.assertLessEqual(len((stem + suffix).encode("utf-8")), 255)
+        hindi = "\u0939\u093f\u0928\u094d\u0926\u0940 \u092a\u0941\u0938\u094d\u0924\u0915 " * 10
+        stem = _file_stem(hindi, suffix, 255)
+        self.assertTrue(hindi.startswith(stem) and len(stem) < 90)
+        self.assertLessEqual(len((stem + suffix).encode("utf-8")), 255)
+        self.assertEqual(_file_stem(han * 90, suffix, None), han * 90)  # Windows limits characters, not bytes.
+        self.assertEqual(_file_stem(han * 3 + " ." + han * 3, suffix, len(suffix) + 11), han * 3)
+        self.assertEqual(_file_stem(han, suffix, len(suffix) + 2), "book")
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux file systems limit names to 255 bytes")
+    def test_a_long_cjk_title_is_saved_under_a_name_the_folder_accepts(self):
+        result = save_book("\u6f22" * 90, "pdf", self.folder, lambda stream: stream.write(b"%PDF-synthetic"))
+        self.assertEqual(result.read_bytes(), b"%PDF-synthetic")
+        self.assertLessEqual(len(os.fsencode(result.name)), 255)
+
+    def test_a_name_the_folder_still_refuses_is_saved_under_a_short_one(self):
+        real, names = os.link, []
+
+        def link(source, target):
+            names.append(Path(target).name)
+            if len(names) == 1:
+                raise OSError(errno.ENAMETOOLONG, "synthetic")
+            return real(source, target)
+
+        with patch("zlib_connector.book_files.os.link", side_effect=link):
+            result = save_book("Example", "pdf", self.folder, lambda stream: stream.write(b"%PDF-synthetic"))
+        self.assertEqual(len(names), 2)
+        self.assertRegex(result.name, r"^book-[0-9a-f]{12}\.pdf$")
+        self.assertEqual(names[0][len("Example"):], names[1][len("book"):])
+        self.assertEqual(list(self.folder.iterdir()), [result])
 
     def test_cancellation_before_writer_and_before_publication_never_saves(self):
         from zlib_connector.transfer import CancellationToken, TransferCancelled
