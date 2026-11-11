@@ -27,6 +27,7 @@ from .terminal_text import terminal_text
 MAX_INPUT_BYTES = 16 * 1024 * 1024
 MAX_ITEMS = 1000
 MAX_QUERY_CHARS = 500
+MAX_JSON_DEPTH = 32  # Plans and reports need 6 levels; Python 3.14 on Linux parses far deeper input.
 PLAN_KIND = "zlib-connector-batch-plan"
 REPORT_KIND = "zlib-connector-batch-report"
 INPUT_KINDS = ("txt", "csv", "json")
@@ -512,17 +513,36 @@ def _finite_float(text):
     return value
 
 
+def _nested_too_deeply(value) -> bool:
+    """Check nesting iteratively, so the limit does not depend on the interpreter's stack."""
+    pending = [(value, 1)]
+    while pending:
+        current, depth = pending.pop()
+        if isinstance(current, dict):
+            current = current.values()
+        elif not isinstance(current, list):
+            continue
+        if depth > MAX_JSON_DEPTH:
+            return True
+        pending.extend((child, depth + 1) for child in current)
+    return False
+
+
 def load_json(text: str, what: str):
-    """Parse strict JSON: duplicate keys and non-finite numbers are refused."""
+    """Parse strict JSON: duplicate keys, non-finite numbers and nesting deeper than
+    MAX_JSON_DEPTH levels are refused on every platform."""
     try:
-        return json.loads(text, object_pairs_hook=_unique_object, parse_constant=_invalid_constant,
-                          parse_float=_finite_float)
+        value = json.loads(text, object_pairs_hook=_unique_object, parse_constant=_invalid_constant,
+                           parse_float=_finite_float)
     except RecursionError:
         raise BatchInputError(f"The {what} is nested too deeply.") from None
     except json.JSONDecodeError as error:
         raise BatchInputError(f"The {what} is not valid JSON (line {error.lineno}, column {error.colno}).") from None
     except ValueError:
         raise BatchInputError(f"The {what} repeats a key or contains a non-finite number.") from None
+    if _nested_too_deeply(value):
+        raise BatchInputError(f"The {what} is nested too deeply.")
+    return value
 
 
 def _display(value, where: str, name: str) -> str:

@@ -240,6 +240,12 @@ class BatchParsingTests(unittest.TestCase):
                      '{"kind": "other", "items": []}', '{"value": 1}', '[1,'):
             with self.subTest(text=text[:20]), self.assertRaises(BatchInputError):
                 items_of(text)
+        # The depth limit is explicit, so it does not depend on the interpreter's stack (Python 3.14 on Linux).
+        with self.assertRaisesRegex(BatchInputError, "nested too deeply"):
+            items_of("[" * 33 + "]" * 33)
+        with self.assertRaisesRegex(BatchInputError, "nested too deeply"):
+            items_of(json.dumps({"items": [{"title": "Dune", "notes": [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[1]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}]}))
+        self.assertIn("must be text or an object", items_of("[" * 32 + "]" * 32)[0].error)
 
     def test_paths_text_bytes_and_sequences_are_distinct_inputs(self):
         with tempfile.TemporaryDirectory() as directory:

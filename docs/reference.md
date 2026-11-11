@@ -332,8 +332,9 @@ plan saved as `plan.txt`: its first line is a lone `[` or `{`, or the whole text
 parses as JSON. Name it `.json` or use `--batch-format json`; titles such as
 `[Graphic novel] Maus` stay searches. Invalid encoding, NUL characters, a CSV
 header without a usable column, a CSV quote that is never closed, a text line
-that sets `email` or `password` (a credentials file), JSON syntax and the size
-limits reject the whole list; any other problem turns that one entry into an
+that sets `email` or `password` (a credentials file), JSON syntax, JSON nested
+deeper than 32 levels and the size limits reject the whole list; any other problem
+turns that one entry into an
 `error` that names its line or item.
 
 | Input | Items |
@@ -468,7 +469,8 @@ contain no tokens, cookies, signed links or credentials, and messages come from 
 fixed table.
 
 A report is read strictly (32 MiB and 10,000 entries at most, duplicate keys,
-unknown fields and invalid values refused); an invalid report, a plan or any other
+nesting deeper than 32 levels, unknown fields and invalid values refused); an
+invalid report, a plan or any other
 JSON is refused and never overwritten. On the next run, each item is matched by
 identity before any search or prompt:
 
