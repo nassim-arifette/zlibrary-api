@@ -9,12 +9,15 @@ import time
 import unittest
 from unittest.mock import Mock, patch
 
+from zlib_connector.cli_terminal import InputPolicy
 from zlib_connector.credentials import Credentials
 from zlib_connector.errors import AuthenticationError
 from zlib_connector.http_cli import add_serve_parser, run_server
 from zlib_connector.session_data import SavedSession, SessionCookie
 from zlib_connector.sessions import SessionStore
 from session_fixture import isolated_sessions
+
+TERMINAL = InputPolicy(allowed=True, password_allowed=True)  # A person at a terminal.
 
 
 def options(*values):
@@ -154,7 +157,7 @@ class HttpCliTests(unittest.TestCase):
         loader = Mock(side_effect=AssertionError)
         with self.assertRaises(OSError):
             run_server(options("serve"), client_factory=lambda *args, **kwargs: client, credentials_loader=loader,
-                       server_factory=Mock(side_effect=OSError("address already in use")))
+                       server_factory=Mock(side_effect=OSError("address already in use")), policy=TERMINAL)
         self.assertEqual(events, ["client_enter", "client_close"])
         self.assertEqual(client.restores, [])
         self.assertEqual(client.logins, [])
@@ -260,7 +263,8 @@ class HttpCliTests(unittest.TestCase):
             args = options("--domain", "https://override.example/", "serve", "--token-file", str(Path(folder) / "token"))
             with redirect_stderr(io.StringIO()):
                 run_server(args, client_factory=factory, credentials_loader=lambda path: Credentials("https://configured.example/"),
-                           prompt=prompt, password_prompt=password, server_factory=lambda *args, **kwargs: FakeServer(events))
+                           prompt=prompt, password_prompt=password, server_factory=lambda *args, **kwargs: FakeServer(events),
+                           policy=TERMINAL)
             factory.assert_called_once_with("https://override.example/", timeout=30)
             self.assertEqual([("reader@example.org", "test-password")], client.logins)
 
@@ -285,7 +289,7 @@ class HttpCliTests(unittest.TestCase):
             with self.assertRaises(OSError):
                 run_server(args, client_factory=lambda *args, **kwargs: client,
                            credentials_loader=lambda path: Credentials(), prompt=prompt, password_prompt=password,
-                           server_factory=Mock(side_effect=OSError("address already in use")))
+                           server_factory=Mock(side_effect=OSError("address already in use")), policy=TERMINAL)
             self.assertEqual(["client_enter", "client_close"], events)
             self.assertEqual([], client.logins)
             prompt.assert_not_called()
@@ -329,7 +333,7 @@ class HttpCliTests(unittest.TestCase):
             with redirect_stdout(output), redirect_stderr(errors), patch("sys.stdin", io.StringIO("reader@example.org\n")), \
                     patch("zlib_connector.http_cli.getpass.getpass", return_value="test-password") as password:
                 run_server(args, client_factory=lambda *args, **kwargs: FakeClient([]), credentials_loader=lambda path: Credentials(),
-                           server_factory=lambda *args, **kwargs: FakeServer([]))
+                           server_factory=lambda *args, **kwargs: FakeServer([]), policy=TERMINAL)
                 self.assertIs(errors, password.call_args.kwargs["stream"])
             self.assertIn("Email: ", errors.getvalue())
             self.assertNotIn("reader@example.org", errors.getvalue())

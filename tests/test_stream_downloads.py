@@ -191,7 +191,10 @@ class StreamDownloadCliTests(unittest.TestCase):
             self.assertEqual(main(["download", "123:ab12", "--output", directory, "--no-progress", "--json"]), 130)
             self.assertEqual(list(Path(directory).iterdir()), [])
         self.assertEqual(stdout.getvalue(), "")
-        self.assertEqual(json.loads(stderr.getvalue()), {"error": "TransferCancelled", "message": "Cancelled."})
+        error = json.loads(stderr.getvalue())
+        self.assertEqual({key: error[key] for key in ("error", "message", "code", "exit_code", "quota_may_be_used")},
+                         {"error": "TransferCancelled", "message": "Cancelled.", "code": "cancelled", "exit_code": 130,
+                          "quota_may_be_used": True})
         self.assertEqual(transport.responses, [])
         self.assertFalse(transport.authenticated)
 

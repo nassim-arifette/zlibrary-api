@@ -133,7 +133,7 @@ class BookCliTests(unittest.TestCase):
                      ["download", "123:ab12", "--language", "english"]):
             with self.subTest(args=args), patch("zlib_connector.cli.load_credentials") as credentials, \
                     patch("sys.stderr", io.StringIO()):
-                self.assertEqual(main(args), 1)
+                self.assertEqual(main(args), 2)
                 credentials.assert_not_called()
 
 

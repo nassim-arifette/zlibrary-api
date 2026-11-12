@@ -40,7 +40,7 @@ def add_mcp_parser(commands):
                     "Claude Desktop or Codex. Register this command in the client; see docs/mcp.md.",
         epilog="Actions are off by default: without flags only read-only tools are listed. --download-dir enables "
                "downloads into that folder, and --allow-account-changes enables changes to favorites, tags and "
-               "booklists. Global options such as --domain, --timeout and --session-file go before 'mcp'.")
+               "booklists. Global options such as --domain, --timeout and --session-file work before or after 'mcp'.")
     command.add_argument("--anonymous", action="store_true",
                          help="never read or send the saved session; list public read tools only")
     command.add_argument("--download-dir", type=Path, metavar="DIR",

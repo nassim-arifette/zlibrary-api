@@ -339,9 +339,9 @@ class WatchTests(unittest.TestCase):
 
         with patch("zlib_connector.cli_jobs.time.monotonic", side_effect=[0, 0, 2]):
             code, output, errors = self.invoke(API(), "--duration", "2")
-        self.assertEqual(0, code)
+        self.assertEqual(3, code)
         self.assertIn("10/20 bytes", output)
-        self.assertEqual("", errors)
+        self.assertEqual("Stopped watching before the task finished. Run the same command to keep watching.\n", errors)
         self.assertEqual(1, len(calls))
 
     def test_watch_never_retries_protocol_network_shutdown_or_early_timeout(self):
@@ -380,7 +380,7 @@ class WatchTests(unittest.TestCase):
         for options in (("--duration", "0"), ("--duration", "3601"), ("--duration", "nan"), ("--after", "secret")):
             with self.subTest(options=options), patch("zlib_connector.cli_jobs.LocalAPI", side_effect=AssertionError("Client opened")), \
                     redirect_stderr(io.StringIO()):
-                self.assertEqual(1, main(["jobs", "watch", IDENTIFIER, *options]))
+                self.assertEqual(2, main(["jobs", "watch", IDENTIFIER, *options]))
 
     def test_last_fractional_second_stops_locally(self):
         calls = []
@@ -392,7 +392,7 @@ class WatchTests(unittest.TestCase):
 
         with patch("zlib_connector.cli_jobs.time.monotonic", side_effect=[0, 0, 1.5]):
             code, output, _ = self.invoke(API(), "--duration", "2")
-        self.assertEqual(0, code)
+        self.assertEqual(3, code)
         self.assertIn("running", output)
         self.assertEqual(1, len(calls))
 

@@ -1,13 +1,13 @@
 """Batch downloads for the CLI: read a list, choose editions, confirm, download, report.
 
 Prompts, candidates, the plan summary and progress use stderr, so stdout can be
-redirected. Interactive means stdin and stderr are terminals and the list is not
-read from stdin. Exit codes: 0 complete, 3 incomplete but only waiting (run the
-same command again later), 4 incomplete and needs attention, 130 cancelled;
-1 and 2 keep their meaning (failure before the batch started, usage error).
+redirected. Interactive means the input policy allows prompts (cli_terminal) and
+the list is not read from stdin. Exit codes: 0 complete, 3 incomplete but only
+waiting (run the same command again later), 4 incomplete and needs attention,
+130 cancelled; a failure before the batch started uses the CLI error codes
+(docs/cli-json.md).
 """
 from contextlib import contextmanager, nullcontext
-import ctypes
 import json
 import os
 from pathlib import Path
@@ -21,6 +21,8 @@ from .batch import (MESSAGES, MISSING_FILE, MOVED_FILE, REFUSED_FILE, BatchRepor
                     searches_needed, shown_path, write_report)
 from .batch_input import (INPUT_KINDS, MAX_INPUT_BYTES, MAX_ITEMS, PLAN_KIND, REPORT_KIND, BatchInputError,
                           _text_item, parse_input)
+from . import cli_terminal
+from .cli_output import InputRequired
 from .cli_progress import ProgressDisplay
 from .cli_session import AccountSession
 from .cli_views import show_books
@@ -77,8 +79,6 @@ def add_batch_options(command) -> None:
                               "LIST.progress.json beside the list)")
     reports.add_argument("--no-report", action="store_true", help="do not read or write a progress file")
     command.add_argument("--yes", action="store_true", help="download a list without confirmation (required without a terminal)")
-    command.add_argument("--interactive", action="store_true",
-                         help="ask for choices on stdin/stderr even when no terminal is detected")
     command.add_argument("--retry-uncertain", action="store_true",
                          help="try again items whose earlier attempt may have used quota")
     command.add_argument("--redownload-missing", action="store_true",
@@ -107,30 +107,7 @@ def _note(text: str) -> None:
 
 
 def _tty(stream) -> bool:
-    try:
-        if not stream.isatty():
-            return False
-    except (AttributeError, OSError, ValueError):
-        return False
-    return _console(stream)
-
-
-def _console(stream) -> bool:
-    """On Windows, isatty() is also true for NUL: a terminal is a stream with a console mode."""
-    if os.name != "nt":
-        return True
-    try:
-        descriptor = stream.fileno()
-    except (AttributeError, OSError, ValueError):
-        return True  # No descriptor to check, as with a substituted stream: trust isatty().
-    try:
-        import msvcrt
-        get_mode = ctypes.WinDLL("kernel32", use_last_error=True).GetConsoleMode
-        get_mode.argtypes, get_mode.restype = (ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint32)), ctypes.c_int
-        mode = ctypes.c_uint32()
-        return bool(get_mode(msvcrt.get_osfhandle(descriptor), ctypes.byref(mode)))
-    except (AttributeError, ImportError, OSError, ValueError, ctypes.ArgumentError):
-        return False
+    return cli_terminal.is_terminal(stream)
 
 
 def _short(value: str, limit: int = 80) -> str:
@@ -366,19 +343,19 @@ def _report_path(args, list_path: Path | None, kind: str | None) -> Path | None:
     return path
 
 
-def _interactive(args) -> bool:
-    if args.batch_file == "-":
-        return False
-    return args.interactive or (_tty(sys.stdin) and _tty(sys.stderr))
+def _interactive(args, policy) -> bool:
+    return policy.allowed and args.batch_file != "-"
 
 
-def run_batch_command(args, *, client_factory, credentials_loader, prompt, password_prompt) -> int:
+def run_batch_command(args, *, client_factory, credentials_loader, prompt, password_prompt, policy=None) -> int:
     """Validate everything local first; only then sign in, plan and download."""
+    policy = cli_terminal.InputPolicy.from_args(args) if policy is None else policy
     limit, filters = _validate(args)
-    interactive = _interactive(args)
+    interactive = _interactive(args, policy)
     if not args.dry_run and not interactive and not args.yes:
         # Known before anything is read, so a refused run consumes no standard input.
-        raise ValueError("Use --yes to download a list without a terminal, or --dry-run to review it first.")
+        raise InputRequired("Use --yes to download a list without a terminal, or --dry-run to review it first.",
+                            name="ValueError")
     if args.batch_file not in (None, "-"):
         credentials = args.credentials if args.credentials is not None else DEFAULT_FILE
         if _same_file(Path(args.batch_file), Path(credentials)):
@@ -388,8 +365,9 @@ def run_batch_command(args, *, client_factory, credentials_loader, prompt, passw
         # The list occupies standard input, so an email prompt could not be answered.
         account = AccountSession(args, credentials_loader=credentials_loader)
         if not account.anonymous and not account.restore and not (account.credentials and account.credentials.email):
-            raise ValueError("Reading the list from standard input needs a saved session or an email in the"
-                             " credentials file. Run zlib-cli login first, or pass the list as a file.")
+            raise InputRequired("Reading the list from standard input needs a saved session or an email in the"
+                                " credentials file. Run zlib-cli login first, or pass the list as a file.",
+                                name="ValueError")
     items, list_path, kind = _read_items(args)
     if not items:
         raise ValueError("The list contains no items.")
@@ -413,12 +391,13 @@ def run_batch_command(args, *, client_factory, credentials_loader, prompt, passw
                                           retry_uncertain=args.retry_uncertain,
                                           redownload_missing=args.redownload_missing, folder=command.folder)
                 if waiting:
-                    raise ValueError(f"{len(waiting)} item{'s need' if len(waiting) != 1 else ' needs'} a search"
-                                     " result choice. Use --pick N without a terminal, or --dry-run to see the"
-                                     " candidates.")
+                    raise InputRequired(f"{len(waiting)} item{'s need' if len(waiting) != 1 else ' needs'} a search"
+                                        " result choice. Use --pick N without a terminal, or --dry-run to see the"
+                                        " candidates.", name="ValueError")
             check_folder(args.output)
         if account is None:
             account = AccountSession(args, credentials_loader=credentials_loader)
+        account.require_input(policy, explicit=False)
         with client_factory(account.domain, timeout=args.timeout) as client:
             account.authenticate(client, prompt=prompt, password_prompt=password_prompt)
             return command.run(client, previous)

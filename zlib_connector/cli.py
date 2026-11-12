@@ -1,6 +1,5 @@
 """CLI adapter. Credentials are prompted, never accepted as command-line flags."""
 import getpass
-import json
 import re
 import shlex
 import sys
@@ -21,8 +20,10 @@ from .cli_tui import run_tui
 from .cli_progress import ProgressDisplay
 from .cli_batch import is_batch, run_batch_command
 from .cli_session import AccountSession, local_session_command, session_message
-from .transfer import TransferCancelled
-from .cli_parser import BOOKLIST_MUTATIONS, CATALOG_COMMANDS, DISCOVERY_COMMANDS, LIBRARY_COMMANDS, parser
+from .cli_output import CommandError, InputRequired, prepare_streams, print_json, report_error, wants_json
+from .cli_terminal import InputPolicy, ask, choose, confirm, password
+from .cli_parser import (BOOKLIST_MUTATIONS, CATALOG_COMMANDS, DISCOVERY_COMMANDS, LIBRARY_COMMANDS, command_names,
+                         finish, parser)
 from .cli_views import account_confirmation, booklist_options, run_catalog_command, run_library_command, show_books
 
 
@@ -87,9 +88,42 @@ def shell(client: Client, *, progress=None):
         except (ConnectorError, ValueError, OSError) as error:
             print(f"{type(error).__name__}: {error}", file=sys.stderr)
 
+class _Operation:
+    """Which call is running, for classify(): a read, an account change or a download."""
+
+    def __init__(self):
+        self.kind = "read"
+        self.args = None
+
+
 def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else list(argv)
+    prepare_streams()
+    json_mode = wants_json(argv)
+    operation = _Operation()
+    try:
+        return _run(argv, operation)
+    except (Exception, KeyboardInterrupt) as error:
+        return report_error(error, json_mode=json_mode, operation=operation.kind, args=operation.args,
+                            command=_command_name(argv))
+
+
+def _command_name(argv):
+    """The first known command in argv, for the usage hint; never arbitrary text."""
+    known = set(command_names())
+    for value in argv:
+        if value == "--":
+            break
+        if value in known:
+            return value
+    return None
+
+
+def _run(argv, operation) -> int:
     command_parser = parser()
     args, extras = command_parser.parse_known_args(argv)
+    finish(args)
+    operation.args = args
     if extras:
         # Titles may follow options: download "Dune" --format epub "Neuromancer".
         if args.command != "download" or any(value.startswith("-") for value in extras):
@@ -97,161 +131,170 @@ def main(argv: list[str] | None = None) -> int:
         args.query = [*args.query, *extras]
     if args.command == "mcp":
         return run_mcp(args, client_factory=Client)
-    try:
-        if args.command == "download":
-            if is_batch(args):
-                return run_batch_command(args, client_factory=Client, credentials_loader=load_credentials,
-                                         prompt=prompt,
-                                         password_prompt=lambda label: getpass.getpass(label, stream=sys.stderr))
-            args.query = args.query[0]
-            args.page = 1 if args.page is None else args.page
-            args.limit = 20 if args.limit is None else args.limit
-        if args.command == "tui":
-            run_tui(args)
-            return 0
-        if args.command == "jobs":
-            run_jobs(args)
-            return 0
-        if args.command in ("status", "logout"):
-            status = local_session_command(args, client_factory=Client)
-            print(json.dumps(status) if args.json else session_message(status))
-            return 0
-        if args.command == "serve":
-            run_server(args, client_factory=Client, credentials_loader=load_credentials, prompt=prompt)
-            return 0
-        if args.command == "domains":
-            print(json.dumps(list(KNOWN_DOMAINS)) if args.json else "\n".join(KNOWN_DOMAINS))
-            return 0
-        if args.command == "doctor":
-            domains = args.domains or ([args.domain] if args.domain else None)
-            report = diagnose_domains(domains, timeout=args.timeout, workers=args.workers)
-            if args.json:
-                print(json.dumps(report.to_dict()))
-            else:
-                for result in report.results:
-                    state = "ok" if result.search_ok else result.error_code
-                    print(f"{result.domain}  {state}  {result.elapsed_ms} ms  {result.message}")
-                print(f"Suggested domain: {report.recommended_domain or 'none'}")
-            return 0 if report.recommended_domain else 1
-        if args.command == "check":
-            domain = args.domain or "https://z-lib.by/"
-            with Client(domain, timeout=args.timeout) as client:
-                books = client.search("Pride and Prejudice", limit=1)
-                print(json.dumps({"reachable": True, "domain": client.domain, "api": "eapi", "search_ok": True, "results": len(books), "authenticated": False}))
-            return 0
-        filters = None
-        reference = None
-        favorite_change = args.command == "favorites" and args.favorite_action in ("add", "remove")
-        booklist_change = args.command == "booklists" and args.booklist_action in BOOKLIST_MUTATIONS
-        tag_change = args.command == "tags" and args.tag_action in ("add", "remove")
-        account_change = favorite_change or booklist_change or tag_change
-        if account_change and not args.yes and not sys.stdin.isatty():
-            raise ValueError("Use --yes to apply an account update in non-interactive mode.")
-        if favorite_change:
-            reference = args.reference
-            if args.page != 1 or args.limit != 20 or args.order != "saved_date":
-                raise ValueError("List pagination and ordering cannot be used with a favorite update.")
-        if tag_change:
-            reference = args.reference
-            validate_tags(args.tags, for_removal=args.tag_action == "remove")
-        if args.command in ("favorites", "history", "library"):
-            validate_page(getattr(args, "page", 1), args.limit)
-        if args.command == "booklists" and args.booklist_action in ("show", "add", "remove", "edit", "delete"):
-            booklist_id(args.booklist_id)
-            if args.booklist_action == "show":
-                validate_page(args.page, 20)
-            elif args.booklist_action == "add":
-                reference = args.reference
-            elif args.booklist_action == "remove":
-                booklist_entry_id(args.entry_id)
-            elif args.booklist_action == "edit":
-                validate_booklist_changes(**booklist_options(args))
-        if args.command == "booklists" and args.booklist_action == "create":
-            BooklistSettings(**booklist_options(args))
-        if args.command in DISCOVERY_COMMANDS and not 1 <= args.limit <= 1000:
-            raise ValueError("Choose a display limit between 1 and 1000 books.")
-        if args.command in ("info", "formats", "similar"):
-            reference = args.reference
-        if args.command in ("search", "download"):
-            filters = search_filters(args)
-            if args.command == "download" and (not args.output.is_dir() or (args.pick is not None and args.pick < 1)):
-                raise ValueError("Choose an existing output directory and a positive --pick number.")
-            if args.command == "download" and (re.match(r"^[0-9]+:", args.query) or "://" in args.query):
-                reference = args.query
-                if args.pick is not None or filters != SearchFilters() or args.page != 1 or args.limit != 20:
-                    raise ValueError("Search filters and --pick cannot be used with a direct book reference.")
-        if reference is not None:
-            BookReference.parse(reference, args.domain)
-        if args.command in CATALOG_COMMANDS and getattr(args, "anonymous", False):
-            with Client(args.domain or "https://z-lib.by/", timeout=args.timeout) as client:
-                run_catalog_command(client, args, filters)
-            return 0
-        account = AccountSession(args, credentials_loader=load_credentials)
-        with Client(account.domain, timeout=args.timeout) as client:
-            if reference is not None:
-                BookReference.parse(reference, client.domain)
-            if account_change and not args.yes:
-                if prompt(account_confirmation(args, client.domain)).lower() not in ("y", "yes"):
-                    print("Cancelled.", file=sys.stderr)
-                    return 130
-            account.authenticate(client, prompt=prompt,
-                                 password_prompt=lambda label: getpass.getpass(label, stream=sys.stderr))
-            if args.command == "login":
-                print(json.dumps({"authenticated": True, "stored": True, "domain": client.domain})
-                      if args.json else f"Session saved for {client.domain}.")
-                return 0
-            if args.command == "auth-test":
-                print(json.dumps({"authenticated": True}))
-                return 0
-            if args.command == "shell":
-                shell(client, progress=args.progress)
-                return 0
-            if args.command in CATALOG_COMMANDS:
-                run_catalog_command(client, args, filters)
-                return 0
-            if args.command in ("profile", "quota"):
-                profile = client.get_profile()
-                if args.json:
-                    value = profile.to_dict() if args.command == "profile" else profile.quota.to_dict()
-                    print(json.dumps(value))
-                else:
-                    for name, value in profile.quota.to_dict().items():
-                        print(f"{name.capitalize()}: {value if value is not None else 'unknown'}")
-                return 0
-            if args.command in LIBRARY_COMMANDS:
-                run_library_command(client, args)
-                return 0
-            if reference is not None:
-                selected = reference
-            else:
-                books = client.search(args.query, filters=filters, page=args.page, limit=args.limit)
-                if not books:
-                    raise ValueError("No supported books found for this query.")
-                if args.pick is None:
-                    show_books(books, file=sys.stderr)
-                    index = int(prompt("Result number: "))
-                else:
-                    index = args.pick
-                if not 1 <= index <= len(books):
-                    raise ValueError("Choose a number from the returned results.")
-                selected = books[index - 1]
-            with ProgressDisplay(args.progress) as display:
-                path = client.download(selected, args.output, progress=display)
-            print(json.dumps({"path": str(path)}, ensure_ascii=False) if args.json else path)
+    policy = InputPolicy.from_args(args)
+
+    def ask_line(label):
+        return ask(label, policy=policy, read=prompt)
+
+    def ask_password(label):
+        return password(label, policy=policy, read=lambda text: getpass.getpass(text, stream=sys.stderr))
+
+    if args.command == "download":
+        if is_batch(args):
+            return run_batch_command(args, client_factory=Client, credentials_loader=load_credentials,
+                                     prompt=ask_line, password_prompt=ask_password, policy=policy)
+        args.query = args.query[0]
+        args.page = 1 if args.page is None else args.page
+        args.limit = 20 if args.limit is None else args.limit
+    if args.command == "tui":
+        run_tui(args)
         return 0
-    except TransferCancelled:
-        print(json.dumps({"error": "TransferCancelled", "message": "Cancelled."}) if getattr(args, "json", False)
-              else "Cancelled.", file=sys.stderr)
-        return 130
-    except (ConnectorError, ValueError) as error:
-        if getattr(args, "json", False):
-            print(json.dumps({"error": type(error).__name__, "message": str(error)}), file=sys.stderr)
+    if args.command == "jobs":
+        return run_jobs(args)
+    if args.command in ("status", "logout"):
+        status = local_session_command(args, client_factory=Client)
+        if args.json:
+            print_json(status)
         else:
-            print(f"{type(error).__name__}: {error}", file=sys.stderr)
-        return 1
-    except (EOFError, KeyboardInterrupt):
-        print("Cancelled.", file=sys.stderr)
-        return 130
-    except OSError:
-        print("Local I/O failed. Check the destination and permissions.", file=sys.stderr)
-        return 1
+            print(session_message(status))
+        return 0
+    if args.command == "serve":
+        run_server(args, client_factory=Client, credentials_loader=load_credentials, prompt=ask_line,
+                   password_prompt=ask_password, policy=policy)
+        return 0
+    if args.command == "domains":
+        if args.json:
+            print_json(list(KNOWN_DOMAINS))
+        else:
+            print("\n".join(KNOWN_DOMAINS))
+        return 0
+    if args.command == "doctor":
+        domains = args.domains or ([args.domain] if args.domain else None)
+        report = diagnose_domains(domains, timeout=args.timeout, workers=args.workers)
+        if args.json:
+            print_json(report.to_dict())
+        else:
+            for result in report.results:
+                state = "ok" if result.search_ok else result.error_code
+                print(f"{result.domain}  {state}  {result.elapsed_ms} ms  {result.message}")
+            print(f"Suggested domain: {report.recommended_domain or 'none'}")
+        return 0 if report.recommended_domain else 1
+    if args.command == "check":
+        domain = args.domain or "https://z-lib.by/"
+        with Client(domain, timeout=args.timeout) as client:
+            books = client.search("Pride and Prejudice", limit=1)
+            print_json({"reachable": True, "domain": client.domain, "api": "eapi", "search_ok": True,
+                        "results": len(books), "authenticated": False})
+        return 0
+    if args.command == "shell" and not policy.allowed:
+        raise InputRequired("The shell needs a terminal. Use search and download in scripts, or add --interactive"
+                            " to read commands from standard input.")
+    filters = None
+    reference = None
+    favorite_change = args.command == "favorites" and args.favorite_action in ("add", "remove")
+    booklist_change = args.command == "booklists" and args.booklist_action in BOOKLIST_MUTATIONS
+    tag_change = args.command == "tags" and args.tag_action in ("add", "remove")
+    account_change = favorite_change or booklist_change or tag_change
+    if account_change and not args.yes and not policy.allowed:
+        raise InputRequired("Use --yes to apply an account update in non-interactive mode.", name="ValueError")
+    if favorite_change:
+        reference = args.reference
+        if args.page != 1 or args.limit != 20 or args.order != "saved_date":
+            raise ValueError("List pagination and ordering cannot be used with a favorite update.")
+    if tag_change:
+        reference = args.reference
+        validate_tags(args.tags, for_removal=args.tag_action == "remove")
+    if args.command in ("favorites", "history", "library"):
+        validate_page(getattr(args, "page", 1), args.limit)
+    if args.command == "booklists" and args.booklist_action in ("show", "add", "remove", "edit", "delete"):
+        booklist_id(args.booklist_id)
+        if args.booklist_action == "show":
+            validate_page(args.page, 20)
+        elif args.booklist_action == "add":
+            reference = args.reference
+        elif args.booklist_action == "remove":
+            booklist_entry_id(args.entry_id)
+        elif args.booklist_action == "edit":
+            validate_booklist_changes(**booklist_options(args))
+    if args.command == "booklists" and args.booklist_action == "create":
+        BooklistSettings(**booklist_options(args))
+    if args.command in DISCOVERY_COMMANDS and not 1 <= args.limit <= 1000:
+        raise ValueError("Choose a display limit between 1 and 1000 books.")
+    if args.command in ("info", "formats", "similar"):
+        reference = args.reference
+    if args.command in ("search", "download"):
+        filters = search_filters(args)
+        if args.command == "download" and (not args.output.is_dir() or (args.pick is not None and args.pick < 1)):
+            raise ValueError("Choose an existing output directory and a positive --pick number.")
+        if args.command == "download" and (re.match(r"^[0-9]+:", args.query) or "://" in args.query):
+            reference = args.query
+            if args.pick is not None or filters != SearchFilters() or args.page != 1 or args.limit != 20:
+                raise ValueError("Search filters and --pick cannot be used with a direct book reference.")
+        if args.command == "download" and reference is None and args.pick is None and not policy.allowed:
+            raise InputRequired("Choosing a search result needs a terminal. Add --pick N, or download an ID:HASH"
+                                " reference.")
+    if reference is not None:
+        BookReference.parse(reference, args.domain)
+    if args.command in CATALOG_COMMANDS and getattr(args, "anonymous", False):
+        with Client(args.domain or "https://z-lib.by/", timeout=args.timeout) as client:
+            run_catalog_command(client, args, filters)
+        return 0
+    account = AccountSession(args, credentials_loader=load_credentials)
+    account.require_input(policy, explicit=args.command in ("login", "auth-test"))
+    with Client(account.domain, timeout=args.timeout) as client:
+        if reference is not None:
+            BookReference.parse(reference, client.domain)
+        if account_change and not args.yes:
+            confirm(account_confirmation(args, client.domain), policy=policy, read=prompt)
+        account.authenticate(client, prompt=ask_line, password_prompt=ask_password)
+        if args.command == "login":
+            if args.json:
+                print_json({"authenticated": True, "stored": True, "domain": client.domain})
+            else:
+                print(f"Session saved for {client.domain}.")
+            return 0
+        if args.command == "auth-test":
+            print_json({"authenticated": True})
+            return 0
+        if args.command == "shell":
+            shell(client, progress=args.progress)
+            return 0
+        if args.command in CATALOG_COMMANDS:
+            run_catalog_command(client, args, filters)
+            return 0
+        if args.command in ("profile", "quota"):
+            profile = client.get_profile()
+            if args.json:
+                print_json(profile.to_dict() if args.command == "profile" else profile.quota.to_dict())
+            else:
+                for name, value in profile.quota.to_dict().items():
+                    print(f"{name.capitalize()}: {value if value is not None else 'unknown'}")
+            return 0
+        if args.command in LIBRARY_COMMANDS:
+            if account_change:
+                operation.kind = "account_change"  # Only the mutating Client call runs from here.
+            run_library_command(client, args)
+            return 0
+        if reference is not None:
+            selected = reference
+        else:
+            books = client.search(args.query, filters=filters, page=args.page, limit=args.limit)
+            if not books:
+                raise CommandError("No supported books found for this query.", code="not_found")
+            if args.pick is None:
+                show_books(books, file=sys.stderr)
+                index = choose(len(books), policy=policy, read=prompt)
+            else:
+                index = args.pick
+            if not 1 <= index <= len(books):
+                raise ValueError("Choose a number from the returned results.")
+            selected = books[index - 1]
+        operation.kind = "download"
+        with ProgressDisplay(args.progress) as display:
+            path = client.download(selected, args.output, progress=display)
+        operation.kind = "read"
+        if args.json:
+            print_json({"path": str(path)})
+        else:
+            print(path)
+    return 0

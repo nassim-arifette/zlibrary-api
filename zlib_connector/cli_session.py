@@ -1,23 +1,24 @@
 """Shared account selection and authentication for the CLI and HTTP launcher."""
-from pathlib import Path
 
+from .cli_output import CommandError, InputRequired
 from .errors import AuthenticationError
 from .session_data import canonical_origin
 from .sessions import SessionStore
 
 
 def add_session_options(parser, commands):
-    options = parser.add_mutually_exclusive_group()
-    options.add_argument("--session-file", type=Path,
-                         help="private saved session (default: state directory/session.json)")
-    options.add_argument("--no-session", action="store_true", help="do not read or save persistent sessions")
+    """--session-file and --no-session are global options (cli_parser.common_options)."""
     for name, help_text in (("login", "sign in and save a private session"),
                             ("logout", "forget the local session without revoking the server session"),
                             ("status", "inspect the local session without connecting")):
         command = commands.add_parser(name, help=help_text)
-        command.add_argument("--json", action="store_true")
         if name == "status":
             command.add_argument("--verify", action="store_true", help="verify the saved session with its domain")
+
+
+def domain_mismatch(message):
+    return CommandError(message, code="session_domain_mismatch",
+                        hint="Run zlib-cli login on that domain, or use --no-session.")
 
 
 class AccountSession:
@@ -51,7 +52,33 @@ class AccountSession:
             saved.origin if saved is not None else configured)
         self.restore = saved is not None and not fresh
         if self.restore and canonical_origin(self.domain) != saved.origin:
-            raise ValueError("The saved session belongs to another domain. Use login or --no-session explicitly.")
+            raise domain_mismatch("The saved session belongs to another domain. Use login or --no-session explicitly.")
+
+    @property
+    def needs_prompt(self) -> bool:
+        """True when no session will be restored and the email or password is missing."""
+        if self.anonymous or self.restore:
+            return False
+        credentials = self.credentials
+        return credentials is None or not credentials.email or not credentials.password
+
+    def require_input(self, policy, *, explicit: bool) -> None:
+        """Refuse before any request when signing in would need a prompt that the policy forbids.
+
+        ``explicit``: the command exists to sign in (login, auth-test).
+        """
+        if not self.needs_prompt:
+            return
+        credentials = self.credentials
+        email = credentials is not None and credentials.email
+        password = credentials is not None and credentials.password
+        if (email or policy.allowed) and (password or policy.password_allowed):
+            return
+        if explicit:
+            raise InputRequired("Signing in needs a terminal to ask for the email and password, or both in the"
+                                " credentials file.")
+        raise CommandError("No saved session, and no terminal to sign in.", name="AuthenticationError",
+                           code="upstream_authentication_required", hint="Run zlib-cli login in a terminal first.")
 
     def authenticate(self, client, *, prompt, password_prompt):
         if self.anonymous:
@@ -81,7 +108,7 @@ def local_session_command(args, *, client_factory):
     if args.domain is not None:
         origin = canonical_origin(args.domain)
         if snapshot.session is not None and snapshot.session.origin != origin:
-            raise ValueError("The saved session belongs to another domain.")
+            raise domain_mismatch("The saved session belongs to another domain.")
     if args.command == "logout":
         return store.clear(expected_generation=snapshot.generation).status()
     status = snapshot.status()

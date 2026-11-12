@@ -60,8 +60,9 @@ def _reference(value) -> BookReference:
 class CatalogAPIError(LocalAPIError):
     """Safe HTTP status information without upstream response text."""
 
-    def __init__(self, status):
+    def __init__(self, status, code=None, retryable=None, outcome=None):
         self.status = status
+        self.code, self.retryable, self.outcome = code, retryable, outcome
         ConnectorError.__init__(self, _STATUS_MESSAGES.get(status, "The local API could not load the requested catalog data."))
 
 
@@ -74,8 +75,8 @@ class _CatalogHTTP(LocalAPI):
             raise ValueError("Unsupported local catalog operation.")
 
     @staticmethod
-    def _status_error(status):
-        return CatalogAPIError(status)
+    def _status_error(status, **details):
+        return CatalogAPIError(status, **details)
 
 
 class CatalogAPI:

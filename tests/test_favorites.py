@@ -118,7 +118,7 @@ class FavoriteCliTests(unittest.TestCase):
     def test_non_interactive_account_update_requires_explicit_yes(self):
         with patch("sys.stdin", io.StringIO()), patch("sys.stderr", io.StringIO()), \
                 patch("zlib_connector.cli.load_credentials") as load:
-            self.assertEqual(main(["favorites", "add", "123:ab12"]), 1)
+            self.assertEqual(main(["favorites", "add", "123:ab12"]), 2)
         load.assert_not_called()
 
     def test_explicit_cli_update_returns_confirmed_state(self):
@@ -137,7 +137,7 @@ class FavoriteCliTests(unittest.TestCase):
         input_stream.isatty = lambda: True
         with patch("zlib_connector.cli.Client", return_value=Client(ORIGIN, transport=transport)), \
                 patch("zlib_connector.cli.load_credentials", return_value=Credentials(ORIGIN, "synthetic", "synthetic")), \
-                patch("sys.stdin", input_stream), patch("sys.stderr", io.StringIO()):
+                patch("sys.stdin", input_stream), patch("zlib_connector.cli_terminal.is_terminal", return_value=True), patch("sys.stderr", io.StringIO()):
             self.assertEqual(main(["favorites", "remove", "123:ab12"]), 130)
         self.assertEqual(transport.calls, [])
 

@@ -8,8 +8,10 @@ catalog client; ordinary Python and CLI use does not require Textual.
 
 ## CLI behavior
 
-Global flags (`--domain`, `--credentials`, `--timeout`, `--session-file`,
-`--no-session`) go before the command.
+Global options (`--domain`, `--credentials`, `--timeout`, `--session-file`,
+`--no-session`, `--json`, `--no-input`, `--interactive`) work before or after the
+command, and after an action such as `favorites add`. `zlib-cli --version` prints
+the installed version.
 Repeat `--format` and `--language` to select several formats/languages. Search and
 query-based download also accept `--year-from`, `--year-to` and `--order`:
 
@@ -62,10 +64,34 @@ zlib> download 1 "C:/Books"
 zlib> quit
 ```
 
-`--json` returns successful search/download results on stdout; prompts and failures
-use stderr. Exit status is 0 on success, 1 on failure, 2 for a command-line usage
-error and 130 on interruption. Batch downloads add 3 and 4 (see
-[Batch downloads](#batch-downloads)).
+`--json` returns results on stdout; prompts, notes and failures use stderr. In JSON
+mode every failure is one JSON object on stderr with a stable `code`, `exit_code`,
+`retryable` and `outcome`; [CLI output for scripts](cli-json.md) lists the shapes,
+the codes and a migration table. Exit codes:
+
+| Code | Meaning |
+|---|---|
+| 0 | Success, including empty results |
+| 1 | Failed: refused, browser challenge, protocol change, not found, local I/O or local API problem, internal error |
+| 2 | Usage: invalid argument or value, input required, saved session for another domain |
+| 3 | Try again later: rate limit or quota, timeout or network failure on a read, busy lock |
+| 4 | Check before trying again: an account change or download may have taken effect, session conflict |
+| 5 | Sign-in needed: no usable session or credentials, or the session expired or was refused |
+| 130 | Cancelled: Ctrl+C, end of input at a prompt, declined confirmation, cancelled transfer |
+
+List downloads use 3 and 4 for their results too (see [Batch downloads](#batch-downloads)),
+`doctor` returns 1 when no domain works, and `jobs watch` returns 0 when the task
+succeeded, 4 when it failed, was interrupted or cancelled, and 3 when `--duration` ended first.
+
+Prompts (an email, a confirmation, a search result choice, the shell) read stdin only
+when stdin and stderr are terminals, or with `--interactive`. `--no-input` or
+`ZLIB_NO_INPUT=1` turns them off even in a terminal. A password is read only from a
+terminal. When a prompt would be needed but is not allowed, the command stops before
+any request and names the option to add (`--yes`, `--pick N`), or asks you to run
+`zlib-cli login` in a terminal first. Unexpected errors print no traceback unless
+`ZLIB_DEBUG=1` is set. On Windows, set `PYTHONUTF8=1` for UTF-8 pipelines; without it,
+characters the console code page lacks appear as backslash escapes, and JSON is
+always ASCII-escaped.
 Optionally install the console entry point with `python -m pip install -e .` and
 use `zlib-cli` with the same arguments. Installation is not needed for `python -m`.
 
@@ -128,9 +154,9 @@ lock. Clients remain synchronous and are not safe for simultaneous calls.
 CLI commands `login`, `logout`, and `status [--verify]` accept `--json`. Local
 status reports `empty`, `stored` or `expired`, with `verified: false`; stored
 cookies alone do not prove remote validity. Verification requires a usable
-saved session and adds `authenticated: true` on success. The CLI keeps its normal
-exit codes: 0 for successful local inspection, 1 for a failed verification or
-operation. `--no-session` cannot be combined with these session-management
+saved session and adds `authenticated: true` on success. Exit codes: 0 for a
+successful local inspection, 5 when verification finds no usable session or the
+server refuses it, and the usual codes for other failures. `--no-session` cannot be combined with these session-management
 commands. A supplied `--domain` must match before `status` or `logout` can act on
 an existing session.
 
@@ -307,8 +333,9 @@ before it reads standard input, so a refusal does not consume the list. A list
 that is the credentials file itself (the default one or `--credentials FILE`) is
 refused without being read.
 
-A run is **interactive** when stdin and stderr are terminals (or `--interactive`
-is given) and the list is not read from standard input; on Windows a terminal is
+A run is **interactive** when prompts are allowed (stdin and stderr are terminals,
+or `--interactive` is given, and neither `--no-input` nor `ZLIB_NO_INPUT` is set) and
+the list is not read from standard input; on Windows a terminal is
 a console, so a `NUL` redirect does not count as one. Candidates, the plan
 summary, the confirmation and progress use stderr, so stdout can be redirected.
 The prompt `Choose 1-N, s to skip, q to stop:` asks again after an invalid answer;
@@ -548,7 +575,9 @@ Batch exit codes: 0 when every item is `downloaded`, `already_downloaded`,
 `--max-downloads`, a network failure or `q`; 4 when an item is `not_found`, an
 `error`, `needs_choice` or `interrupted`, when the batch stopped on an account,
 verification, protocol, storage or report problem; 130 when cancelled or declined.
-1 still means that the batch could not start, and 2 a usage error.
+A failure before the batch starts uses the [CLI error codes](cli-json.md): 2 for an
+invalid option or a missing `--yes` or `--pick`, 5 when signing in is needed, 1 for
+other failures.
 
 ### Python API
 

@@ -138,7 +138,7 @@ class SearchCliTests(unittest.TestCase):
         with patch("zlib_connector.cli.Client") as constructor, \
                 patch("zlib_connector.cli.load_credentials") as credentials, patch("sys.stderr", io.StringIO()):
             status = main(["search", "Example", "--year-from", "2020", "--year-to", "1900"])
-        self.assertEqual(status, 1)
+        self.assertEqual(status, 2)
         credentials.assert_not_called()
         constructor.assert_not_called()
 

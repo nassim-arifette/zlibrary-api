@@ -173,7 +173,8 @@ class ClientTests(unittest.TestCase):
     def test_cli_json_download_uses_selected_result(self):
         book = Book("Book", "Author", "pdf", ORIGIN+"book/1/x")
         stdout = io.StringIO()
-        with patch("zlib_connector.cli.load_credentials", return_value=Credentials()), patch("zlib_connector.cli.Client") as constructor, patch("zlib_connector.cli.prompt", return_value="synthetic@example.com"), patch("getpass.getpass", return_value="synthetic-password"), patch("sys.stdout", stdout):
+        with patch("zlib_connector.cli.load_credentials", return_value=Credentials()), patch("zlib_connector.cli.Client") as constructor, patch("zlib_connector.cli.prompt", return_value="synthetic@example.com"), patch("getpass.getpass", return_value="synthetic-password"), patch("sys.stdout", stdout), \
+                patch("zlib_connector.cli_terminal.is_terminal", return_value=True):
             client = constructor.return_value.__enter__.return_value
             client.search.return_value = [book]
             client.download.return_value = Path("book.pdf")
@@ -183,7 +184,7 @@ class ClientTests(unittest.TestCase):
 
     def test_cli_invalid_pick_rejected_before_prompt(self):
         with patch("zlib_connector.cli.prompt") as prompt, patch("sys.stderr", io.StringIO()):
-            self.assertEqual(main(["download", "Book", "--pick", "0"]), 1)
+            self.assertEqual(main(["download", "Book", "--pick", "0"]), 2)
             prompt.assert_not_called()
 
 if __name__ == "__main__":

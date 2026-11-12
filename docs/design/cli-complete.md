@@ -1,6 +1,7 @@
 # zlib-cli: complete CLI implementation spec
 
-Design draft, 2026-11-11, not implemented yet; reviews pending.
+Design, 2026-11-11. Status on 2026-11-12: D1 implemented (see `docs/cli-json.md`); D2 to D7 not implemented yet. The
+owner decided the open questions on 2026-11-12 (section 10).
 
 - **Request:** the owner's "cli complet" item: a coherent command set, JSON for every command (errors
   included), documented exit codes, a strict non-interactive mode, lists on standard input, messages kept
@@ -523,6 +524,30 @@ return `True`, or pass `--interactive`. This is expected test churn, not a behav
 If review finds D1 too large for one PR, it splits at one point only: first the output contract (sections
 4.5 to 4.7, `--version` and global options), then the input policy (section 4.4). Each half stays one
 commit.
+
+### 4.13 Implementation notes (2026-11-12)
+
+D1 shipped as one commit, `Add scriptable CLI contract`. Where it differs from the text above:
+
+- **Account-change context follows the HTTP mapping exactly.** Any failure of the mutating call that is not an
+  explicit refusal (sign-in, challenge, rate limit, `DownloadError`, booklist not found) is `mutation_uncertain`
+  with `outcome: "unknown"`, including a local `ValueError`, `OSError` or session error. A `DownloadError` stays
+  `upstream_refused`, as in HTTP.
+- **HTTP keeps its vocabulary.** `upstream_error()` calls `classify()` and maps the code to a status and fixed
+  message. Codes that HTTP never returned (`session_busy`, `invalid_argument`, `cancelled`, ...) fall back to
+  `upstream_error`, `internal_error` or, for a mutation, `mutation_uncertain`, so every HTTP and MCP answer is
+  unchanged. The MCP server already used `upstream_error()` and therefore shares `classify()`.
+- **Text lines kept as before** for a cancellation (`Cancelled.`, `Cancelled. Nothing was changed.`) and a local
+  I/O failure, without a `TypeName:` prefix. A hint already contained in the message is not repeated.
+- **`download --interactive` selects the list flow**, as section 4.3 requires, so piped answers for one title go
+  through the one-book list flow (a choice, then a confirmation).
+- **`-a -` without a saved session or email** keeps its message and becomes `input_required` (exit 2).
+- **`status` and `logout`** use `session_domain_mismatch` for their domain check too.
+- **Parser.** The global options are added to every command and action parser by walking the subparsers, so the
+  command modules only lost their own `--json`. The root parser fills `GLOBAL_DEFAULTS` itself, so other callers of
+  `parser()` (the MCP test fixture, `shell`) see the defaults.
+- **`zlib-cli mcp` startup refusals** keep their one-line text and exit 1: the MCP server owns stdout and its own
+  contract (`docs/mcp.md`). The `--print-config` snippets are unchanged.
 
 ---
 
@@ -1149,19 +1174,23 @@ The target list is `search`, `info`, `download`, `profile`, `quota`, `doctor`, `
   - TypeScript SDK allowlist source:
     https://github.com/modelcontextprotocol/typescript-sdk/blob/v1.x/src/client/stdio.ts
 
-## 10. Open questions for the owner
+## 10. Owner decisions
 
-| # | Question | Recommended answer |
-|---|---|---|
-| 1 | Change the exit codes of single commands now (1 becomes 2, 3, 4 or 5), while the version is 0.1.0? | **Yes**, in D1 with the migration note. Scripts that test `!= 0` are unaffected, and agents get usable codes |
-| 2 | Turn prompts off automatically when stdin or stderr is not a terminal? Piped answers then need `--interactive` | **Yes.** This is the rule batch already uses, and it removes the hangs and the `< NUL` trap on Windows |
-| 3 | Put `config.toml` in `%APPDATA%` (roaming), not `%LOCALAPPDATA%` beside the session? | **Yes, `%APPDATA%`.** Settings are preferences; the session and tokens stay local. A roamed `download_dir` that is missing on another PC fails with a clear message |
-| 4 | Should a configured `domain` win over the saved session's domain, failing on a mismatch like `--domain` does today? | **Yes**, with the warning at `config set domain` and a mismatch message that names the source. Otherwise the setting would silently do nothing while a session exists |
-| 5 | Print a one-line notice when the legacy `credentials.local.toml` beside the package is used? | **Yes**, once per run. Keep the legacy path supported with no removal date: a plain-text password in site-packages deserves the nudge |
-| 6 | `recent`: on 2026-11-09, `/eapi/book/recently` returned only a success marker. Check it again before D5? | **Yes.** Make one read-only check on a domain you choose. If it still returns no list, drop `recent` from D5 and document `search QUERY --order date` |
-| 7 | Ship D1 as one PR (output contract and input policy)? | **Yes**. They share the codes and the terminal test. Section 4.12 describes a fallback split |
-| 8 | Hide and deprecate `check` and `auth-test` in D3? | **Yes.** Their behavior and JSON stay. Remove them no earlier than one release after the notice |
-| 9 | Add a per-run way to clear configured filters, such as `--format any`? | **Not in D2.** `--no-config` and explicit flags cover it. Revisit after real use |
+On 2026-11-12 the owner accepted the recommended answer to every question below. Questions 1, 2 and 7 apply to D1
+and are implemented. Questions 3 to 6, 8 and 9 belong to D2 and later deliverables; only the decision is recorded
+here.
+
+| # | Question | Recommended answer | Decision (2026-11-12) |
+|---|---|---|---|
+| 1 | Change the exit codes of single commands now (1 becomes 2, 3, 4 or 5), while the version is 0.1.0? | **Yes**, in D1 with the migration note. Scripts that test `!= 0` are unaffected, and agents get usable codes | Accepted. Done in D1, with the migration table in `docs/cli-json.md` |
+| 2 | Turn prompts off automatically when stdin or stderr is not a terminal? Piped answers then need `--interactive` | **Yes.** This is the rule batch already uses, and it removes the hangs and the `< NUL` trap on Windows | Accepted. Done in D1; `--interactive` forces prompts on |
+| 3 | Put `config.toml` in `%APPDATA%` (roaming), not `%LOCALAPPDATA%` beside the session? | **Yes, `%APPDATA%`.** Settings are preferences; the session and tokens stay local. A roamed `download_dir` that is missing on another PC fails with a clear message | Accepted, for D2 |
+| 4 | Should a configured `domain` win over the saved session's domain, failing on a mismatch like `--domain` does today? | **Yes**, with the warning at `config set domain` and a mismatch message that names the source. Otherwise the setting would silently do nothing while a session exists | Accepted, for D2 |
+| 5 | Print a one-line notice when the legacy `credentials.local.toml` beside the package is used? | **Yes**, once per run. Keep the legacy path supported with no removal date: a plain-text password in site-packages deserves the nudge | Accepted, for D2 |
+| 6 | `recent`: on 2026-11-09, `/eapi/book/recently` returned only a success marker. Check it again before D5? | **Yes.** Make one read-only check on a domain you choose. If it still returns no list, drop `recent` from D5 and document `search QUERY --order date` | Accepted, before D5 |
+| 7 | Ship D1 as one PR (output contract and input policy)? | **Yes**. They share the codes and the terminal test. Section 4.12 describes a fallback split | Accepted. D1 ships as one PR |
+| 8 | Hide and deprecate `check` and `auth-test` in D3? | **Yes.** Their behavior and JSON stay. Remove them no earlier than one release after the notice | Accepted, for D3 |
+| 9 | Add a per-run way to clear configured filters, such as `--format any`? | **Not in D2.** `--no-config` and explicit flags cover it. Revisit after real use | Accepted, for D2 |
 
 ## 11. Appendices
 

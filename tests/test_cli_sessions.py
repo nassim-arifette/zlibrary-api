@@ -55,6 +55,7 @@ class CliSessionTests(unittest.TestCase):
                 patch("zlib_connector.transport.public_addresses", return_value=["8.8.8.8"]), \
                 patch("http.client.HTTPSConnection", side_effect=connections) as network, \
                 patch("sys.stdin", input_stream or io.StringIO()), \
+                patch("zlib_connector.cli_terminal.is_terminal", return_value=input_stream is not None), \
                 patch("sys.stdout", stdout), patch("sys.stderr", stderr):
             code = main(args)
         self.assertEqual(network.call_count, len(connections))
@@ -112,7 +113,7 @@ class CliSessionTests(unittest.TestCase):
         for args in (["status", "--verify", "--json"], ["history", "--json"]):
             with self.subTest(args=args):
                 code, output, errors, _, _, prompt = self.run_cli(args)
-                self.assertEqual(code, 1)
+                self.assertEqual(code, 5)
                 self.assertEqual(output, "")
                 self.assertEqual(json.loads(errors)["error"], "AuthenticationError")
                 prompt.assert_not_called()
@@ -122,7 +123,7 @@ class CliSessionTests(unittest.TestCase):
         self.saved()
         code, output, errors, connections, _, prompt = self.run_cli(
             ["history", "--json"], replies=[Reply(data=b'{"success":0,"error":"authorization synthetic-cookie-secret"}')])
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 5)
         self.assertEqual(output, "")
         self.assertEqual(json.loads(errors)["error"], "AuthenticationError")
         self.assertEqual(len(connections), 1)
@@ -144,7 +145,7 @@ class CliSessionTests(unittest.TestCase):
             with self.subTest(command=command):
                 code, output, errors, _, _, _ = self.run_cli(
                     ["--domain", "https://other.example/", command, "--json"])
-                self.assertEqual(code, 1)
+                self.assertEqual(code, 2)
                 self.assertEqual(output, "")
                 self.assertEqual(json.loads(errors)["error"], "ValueError")
         self.assertEqual(self.store().read(), snapshot)
@@ -154,7 +155,7 @@ class CliSessionTests(unittest.TestCase):
         other = Credentials("https://configured.example/", "synthetic", "synthetic")
         code, _, errors, _, loader, _ = self.run_cli(
             ["--credentials", "synthetic.toml", "history", "--json"], credentials=other)
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 2)
         self.assertEqual(json.loads(errors)["error"], "ValueError")
         loader.assert_called_once_with(Path("synthetic.toml"))
         code, output, errors, connections, loader, _ = self.run_cli(
@@ -229,7 +230,7 @@ class CliSessionTests(unittest.TestCase):
         for command in ("login", "logout", "status"):
             with self.subTest(command=command):
                 code, output, errors, _, _, _ = self.run_cli(["--no-session", command, "--json"])
-                self.assertEqual(code, 1)
+                self.assertEqual(code, 2)
                 self.assertEqual(output, "")
                 self.assertEqual(json.loads(errors)["error"], "ValueError")
         self.assertFalse(self._isolated_session_state.exists())

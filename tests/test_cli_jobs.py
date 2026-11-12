@@ -9,6 +9,7 @@ import tempfile
 import threading
 import time
 import unittest
+import unittest.mock
 from unittest.mock import patch
 
 from zlib_connector.api_token import load_api_token
@@ -159,4 +160,100 @@ class LocalAPITests(unittest.TestCase):
         for args in (("add", "123:abc", "--key", "short"), ("list", "--offset", "10001")):
             with self.subTest(args=args), patch("zlib_connector.cli_jobs.LocalAPI", side_effect=AssertionError("Client opened")), \
                     redirect_stderr(io.StringIO()):
-                self.assertEqual(1, main(["jobs", *args]))
+                self.assertEqual(2, main(["jobs", *args]))
+
+
+def watch_event(state, cursor):
+    task = {"id": IDENTIFIER, "reference": "123:abc", "state": state, "progress": None}
+    return {"id": cursor, "task": task, "paused": False}
+
+
+class JobsContractTests(unittest.TestCase):
+    """Exit codes and error codes of jobs, including the server's codes (docs/cli-json.md)."""
+
+    def setUp(self):
+        self.folder = tempfile.TemporaryDirectory()
+        self.addCleanup(self.folder.cleanup)
+        self.token_file = Path(self.folder.name) / "api-token"
+        load_api_token(self.token_file)
+
+    def invoke(self, url, *arguments):
+        output, errors = io.StringIO(), io.StringIO()
+        with redirect_stdout(output), redirect_stderr(errors), \
+                patch("zlib_connector.cli.AccountSession", side_effect=AssertionError("Account opened")):
+            code = main(["jobs", "--api-url", url, "--token-file", str(self.token_file), *arguments])
+        return code, output.getvalue(), errors.getvalue()
+
+    def test_server_codes_pass_through_without_the_server_message(self):
+        cases = [
+            (409, {"code": "download_conflict", "retryable": False, "outcome": "not_applied"}, "download_conflict", 1,
+             "Use a new --key for a different book."),
+            (401, {"code": "unauthorized", "retryable": False, "outcome": "not_applied"}, "unauthorized", 1,
+             "Use the token file of the running server (--token-file)."),
+            (503, {"code": "downloads_unavailable", "retryable": False, "outcome": "not_applied"},
+             "downloads_unavailable", 1, "Start the server with --download-dir DIR."),
+            (503, {"code": "downloads_busy", "retryable": True, "outcome": "not_applied"}, "downloads_busy", 3, None),
+            (404, {"code": "download_not_found", "retryable": False, "outcome": "not_applied"}, "download_not_found",
+             1, None),
+            (503, {"code": "download_storage_error", "retryable": False, "outcome": "unknown"},
+             "download_storage_error", 4, None),
+        ]
+        for status, details, code, exit_code, hint in cases:
+            body = json.dumps({"error": {**details, "message": "private-server-text"}}).encode()
+            with self.subTest(code=code), server(status=status, body=body) as (url, _):
+                result, out, err = self.invoke(url, "add", "123:abc", "--key", "test-key-1", "--json")
+            value = json.loads(err)
+            self.assertEqual((exit_code, "", "LocalAPIError", code, exit_code, details["outcome"]),
+                             (result, out, value["error"], value["code"], value["exit_code"], value["outcome"]))
+            self.assertEqual(hint, value.get("hint"))
+            self.assertNotIn("private-server-text", err)
+
+    def test_bodies_that_are_too_large_invalid_or_badly_coded_give_local_api_error(self):
+        padding = " " * (64 * 1024)
+        for body in (('{"error": {"code": "download_conflict"}}' + padding).encode(), b"not-json",
+                     b'{"error": {"code": "Bad-Code", "retryable": "yes", "outcome": "maybe"}}',
+                     b'{"error": "download_conflict"}', b"[]"):
+            with self.subTest(body=body[:40]), server(status=409, body=body) as (url, _):
+                result, out, err = self.invoke(url, "show", IDENTIFIER, "--json")
+            value = json.loads(err)
+            self.assertEqual((1, "", "local_api_error", False, "not_applied"),
+                             (result, out, value["code"], value["retryable"], value["outcome"]))
+
+    def test_network_failures_name_what_to_check(self):
+        cases = [(["add", "123:abc", "--key", "test-key-1"], "unknown", 4,
+                  "Run the same command again with the same --key: the server replays it and never adds a second"
+                  " download."),
+                 (["cancel", IDENTIFIER], "unknown", 4, f"Check with: zlib-cli jobs show {IDENTIFIER}"),
+                 (["resume"], "unknown", 4, "Check with: zlib-cli jobs list"),
+                 (["list"], "not_applied", 1, "Start the server: zlib-cli serve --download-dir DIR"),
+                 (["show", IDENTIFIER], "not_applied", 1, "Start the server: zlib-cli serve --download-dir DIR")]
+        api = unittest.mock.Mock()
+        api.request.side_effect = NetworkError("Could not contact the local API.")
+        for arguments, outcome, exit_code, hint in cases:
+            with self.subTest(arguments=arguments), patch("zlib_connector.cli_jobs.LocalAPI", return_value=api):
+                result, out, err = self.invoke("http://127.0.0.1:9/v1", *arguments, "--json")
+            value = json.loads(err)
+            self.assertEqual((exit_code, "", "NetworkError", "local_api_unavailable", outcome, hint, "network"),
+                             (result, out, value["error"], value["code"], value["outcome"], value["hint"],
+                              value["reason"]))
+
+    def test_watch_exits_by_the_last_state(self):
+        for states, exit_code, note in ((["running", "succeeded"], 0, None),
+                                        (["running", "failed"], 4, "The task ended in state failed."),
+                                        (["interrupted"], 4, "The task ended in state interrupted."),
+                                        (["cancelled"], 4, "The task ended in state cancelled.")):
+            class API:
+                def _events(self, identifier, **options):
+                    for number, state in enumerate(states):
+                        yield watch_event(state, f"{number:032x}")
+
+            for flag in ([], ["--json"]):
+                with self.subTest(states=states, flag=flag), patch("zlib_connector.cli_jobs.LocalAPI",
+                                                                   return_value=API()):
+                    result, out, err = self.invoke("http://127.0.0.1:9/v1", "watch", IDENTIFIER, *flag)
+                self.assertEqual(exit_code, result)
+                if flag:
+                    self.assertEqual(states, [json.loads(line)["task"]["state"] for line in out.splitlines()])
+                    self.assertEqual("", err)
+                else:
+                    self.assertEqual((note + "\n") if note else "", err)

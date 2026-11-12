@@ -101,7 +101,7 @@ class DiscoveryCliTests(unittest.TestCase):
     def test_bad_limits_fail_before_credentials_or_network(self):
         with patch("zlib_connector.cli.load_credentials") as load, patch("zlib_connector.cli.Client") as constructor, \
                 patch("sys.stderr", io.StringIO()):
-            self.assertEqual(main(["recommended", "--limit", "0"]), 1)
+            self.assertEqual(main(["recommended", "--limit", "0"]), 2)
         load.assert_not_called()
         constructor.assert_not_called()
 

@@ -178,7 +178,7 @@ class MyLibraryCliTests(unittest.TestCase):
         for action in ("add", "remove"):
             with self.subTest(action=action), patch("sys.stdin", io.StringIO()), patch("sys.stderr", io.StringIO()), \
                     patch("zlib_connector.cli.load_credentials") as load, patch("zlib_connector.cli.Client") as constructor:
-                self.assertEqual(main(["tags", action, "123:ab12", "Science"]), 1)
+                self.assertEqual(main(["tags", action, "123:ab12", "Science"]), 2)
             load.assert_not_called()
             constructor.assert_not_called()
 
@@ -190,7 +190,7 @@ class MyLibraryCliTests(unittest.TestCase):
             output = io.StringIO()
             with self.subTest(action=action), patch("zlib_connector.cli.Client", return_value=Client(ORIGIN, transport=transport)), \
                     patch("zlib_connector.cli.load_credentials", return_value=Credentials(ORIGIN, "synthetic", "synthetic")), \
-                    patch("sys.stdin", input_stream), patch("sys.stderr", output):
+                    patch("sys.stdin", input_stream), patch("zlib_connector.cli_terminal.is_terminal", return_value=True), patch("sys.stderr", output):
                 self.assertEqual(main(["tags", action, "123:ab12", "Science"]), 130)
             self.assertEqual(transport.calls, [])
             if action == "add":
@@ -201,7 +201,7 @@ class MyLibraryCliTests(unittest.TestCase):
                                ("123:ab12", "unsafe\x1b")):
             with self.subTest(reference=reference, tag=tag), patch("sys.stderr", io.StringIO()), \
                     patch("zlib_connector.cli.load_credentials") as load, patch("zlib_connector.cli.Client") as constructor:
-                self.assertEqual(main(["tags", "add", reference, tag, "--yes"]), 1)
+                self.assertEqual(main(["tags", "add", reference, tag, "--yes"]), 2)
             load.assert_not_called()
             constructor.assert_not_called()
 

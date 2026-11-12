@@ -23,6 +23,7 @@ from .batch_input import (BOOK_KEYS, MAX_ITEMS, PLAN_KIND, REPORT_KIND, STATUSES
                           book_file_name, decode_batch, load_json, parse_batch, parse_document, read_bytes,
                           record_path, too_large, uncertain)
 from .client import Book, SUPPORTED_FORMATS
+from .error_codes import may_have_used_quota
 from .errors import (AuthenticationError, ChallengeRequired, ConnectorError, DownloadError, FormatChangedError,
                      NetworkError, RateLimitError)
 from .search import SearchFilters
@@ -660,15 +661,6 @@ def searches_needed(items, *, filters: SearchFilters | None = None, previous: "B
             if entry.status == "not_started" and entry.book is None and entry.item.query is not None]
 
 
-def _may_have_used_quota(error: BaseException, stage: str | None) -> bool:
-    if stage is None:
-        return False
-    if stage == "link" and (isinstance(error, (RateLimitError, AuthenticationError)) or (
-            isinstance(error, DownloadError) and getattr(error, "reason", None) in ("refused", "unavailable", "no_link"))):
-        return False  # An explicit refusal of the link request.
-    return True
-
-
 def _plain_title(book: Book) -> Book:
     # The title names the file; a control character in it would make the recorded name unusable.
     title = "".join("_" if unicodedata.category(character) in ("Cc", "Cs") else character for character in book.title)
@@ -752,7 +744,7 @@ class _Runner:
 
     def failed(self, entry: BatchEntry, error: BaseException) -> None:
         stage = getattr(error, "download_stage", None)
-        used = _may_have_used_quota(error, stage)
+        used = may_have_used_quota(error, stage)
         self.quota_stale = used  # A link never requested, or refused, left the quota read before it current.
         reason = getattr(error, "reason", None)
         if isinstance(error, (TransferCancelled, KeyboardInterrupt)):

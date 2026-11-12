@@ -3,6 +3,8 @@ import os
 from pathlib import Path
 import sys
 
+from . import cli_terminal
+from .cli_output import CommandError, InputRequired
 from .local_state import state_directory
 
 
@@ -23,20 +25,23 @@ def add_tui_parser(commands):
 def run_tui(args):
     if type(args.page_size) is not int or not 1 <= args.page_size <= 50:
         raise ValueError("Choose a TUI page size between 1 and 50.")
-    if not sys.stdin.isatty() or not sys.stdout.isatty():
-        raise ValueError("The TUI needs an interactive terminal. Use the CLI commands with --json in scripts.")
+    if not cli_terminal.is_terminal(sys.stdin) or not cli_terminal.is_terminal(sys.stdout):
+        raise InputRequired("The TUI needs an interactive terminal. Use the CLI commands with --json in scripts.",
+                            name="ValueError")
     try:
         from .tui.app import CollectionsApp
     except ModuleNotFoundError as error:
         if error.name == "textual" or (error.name or "").startswith("textual."):
-            raise ValueError('Install the optional terminal interface from the project folder: python -m pip install ".[tui]".') from None
+            raise CommandError('Install the optional terminal interface from the project folder: python -m pip install ".[tui]".',
+                               code="missing_dependency", hint='python -m pip install ".[tui]"') from None
         raise
     from .catalog_api import CatalogAPI
 
     try:
         api = CatalogAPI(args.api_url, args.token_file or state_directory() / "api-token", timeout=args.timeout)
     except OSError:
-        raise ValueError("Could not read the local API token. Start zlib-cli serve or select its existing token file with --token-file.") from None
+        raise CommandError("Could not read the local API token. Start zlib-cli serve or select its existing token file"
+                           " with --token-file.", code="local_api_unavailable") from None
     # Textual reads NO_COLOR when constructing App. Apply the per-launch
     # option without changing the caller's environment after construction.
     saved_no_color = os.environ.get("NO_COLOR")
