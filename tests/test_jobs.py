@@ -395,5 +395,38 @@ class DownloadManagerTests(unittest.TestCase):
         self.assertEqual(self.client.downloads, ["123:ab12"])
 
 
+class TaskLookupTests(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.folder = Path(directory.name)
+        self.client = TaskClient()
+
+    def test_find_is_a_side_effect_free_lookup_and_file_path_checks_identity(self):
+        from zlib_connector.jobs import JobFileError
+        self.client.release = threading.Event()
+        manager = DownloadManager(self.client, self.folder)
+        self.addCleanup(manager.close)
+        self.assertIsNone(manager.find("lookup-key"))
+        self.assertEqual(manager.list().total, 0)
+        task = manager.submit("123:ab12", idempotency_key="lookup-key")
+        self.assertEqual(manager.find("lookup-key").id, task.id)
+        with self.assertRaises(ValueError):
+            manager.find("bad key")
+        with self.assertRaises(JobStateError):
+            manager.file_path(task.id)
+        self.client.release.set()
+        deadline = time.monotonic() + 5
+        while manager.get(task.id).state != "succeeded" and time.monotonic() < deadline:
+            time.sleep(0.01)
+        path = manager.file_path(task.id)
+        self.assertTrue(path.is_absolute())
+        self.assertEqual(path.read_bytes(), CONTENT)
+        self.assertEqual(path.parent, self.folder.resolve() / task.id)
+        path.unlink()
+        with self.assertRaises(JobFileError):
+            manager.file_path(task.id)
+
+
 if __name__ == "__main__":
     unittest.main()

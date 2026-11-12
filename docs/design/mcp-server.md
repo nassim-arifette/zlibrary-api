@@ -1,6 +1,7 @@
 # MCP server for zlib-connector: implementation spec
 
-Design draft, 2026-11-11, not implemented yet; reviews pending.
+Design draft, 2026-11-11; owner decisions recorded 2026-11-12 (section 18). Implemented 2026-11-12
+(delivery steps 1 to 5 of section 17, Tier A); Tier B (section 19) is not implemented yet. User guide: `docs/mcp.md`.
 
 Base: `main` at 29ee46b, package version 0.1.0, Python >= 3.11, `dependencies = []`. Paths are relative to
 the repository root and line numbers refer to that commit. This document is self-contained: section 2 restates the
@@ -222,7 +223,7 @@ validation, error codes and outcome semantics match the HTTP API ("C3" in the re
 
 ```
 zlib-cli [--domain ORIGIN] [--timeout SECONDS] [--session-file FILE] mcp
-         [--anonymous] [--download-dir DIR] [--allow-account-changes]
+         [--anonymous] [--download-dir DIR] [--no-download-confirmation] [--allow-account-changes]
          [--print-config {claude-code,claude-desktop,codex}]
 ```
 
@@ -231,6 +232,7 @@ zlib-cli [--domain ORIGIN] [--timeout SECONDS] [--session-file FILE] mcp
 | (none) | Read-only tools. Uses the saved session if there is one, otherwise runs anonymously until the user logs in. |
 | `--anonymous` | Never reads or sends the session. Only public read tools are listed (6 tools). |
 | `--download-dir DIR` | Lists the 5 download tools. DIR must be an existing directory and not a link, and must pass `batch.check_folder()` (hard links, path length), which is checked at startup without any request. It is the only place files are written. |
+| `--no-download-confirmation` | Requires `--download-dir`. Drops the Claude Code confirmation gate from `download_book` and `resume_downloads`, for users who approve downloads in bulk. The annotations stay honest and account changes stay gated. |
 | `--allow-account-changes` | Lists the 9 account-change tools. |
 | `--print-config CLIENT` | Prints a registration snippet for CLIENT and exits 0 without serving (13.4). |
 | global `--domain`, `--timeout`, `--session-file` | Same meaning as for other commands. `--timeout` (0 to 300 s, default 30) is the absolute deadline of every request, **including a whole book transfer**. |
@@ -239,6 +241,7 @@ Startup refuses, with exit code 1 and a one-line message on stderr before readin
 
 - `--credentials` or `--no-session` (MCP never reads credentials);
 - `--anonymous` combined with `--download-dir`, `--allow-account-changes` or `--session-file`;
+- `--no-download-confirmation` without `--download-dir`;
 - a timeout outside (0, 300];
 - a bad `--download-dir`;
 - a `--domain` that differs from the saved session's origin (same rule and message as
@@ -410,6 +413,7 @@ leftovers may stay in its task folder.
   4. Annotations are honest, and Claude Code gets the `_meta` gate.
 - **`_meta`.** `{"anthropic/requiresUserInteraction": true}` goes on `download_book`, `resume_downloads` and all 9
   account-change tools: every call that may use quota or change the account is prompted.
+  `--no-download-confirmation` removes it from the two download tools only.
 - **Schemas.**
   - Generate each property from a `Field` (`contract.py:31`). Drop `x-*` keys and replace the generic description
     with the one below.
@@ -1200,30 +1204,20 @@ the client), elicitation-based confirmation, a batch planning tool, a per-downlo
 
 ---
 
-## 18. Open questions for the owner (recommendation first)
+## 18. Owner decisions (2026-11-12)
 
-1. **Gate on downloads.** Should `download_book` and `resume_downloads` force a Claude Code prompt on every call
-   (`requiresUserInteraction`), like account changes? *Recommended: yes.* Each call may use the daily quota, and
-   the prompt shows the exact reference. The cost is one click per book.
-2. **File paths.** Should results return the absolute path of finished downloads and the folder, unlike the HTTP
-   API, which never returns paths? *Recommended: yes.* The stdio client is the user's own local agent in the same
-   trust domain, and the path is needed to open the book. Only paths inside `--download-dir` are returned.
-3. **Download lifetime.** Downloads stop when the MCP client closes; the active task ends `interrupted`, with an
-   unknown outcome and no retry. Is that acceptable for v1? *Recommended: yes, documented.* `--api-url` delegation
-   to `zlib-cli serve` comes later if users run long queues.
-4. **Password login.** Allow an in-memory login from `credentials.local.toml` when no session is saved?
-   *Recommended: no.* Restore-only or anonymous; `zlib-cli login` stays the only sign-in path.
-5. **Batch tools.** Expose batch planning or running in v1? *Recommended: no.* The assistant searches, the user
-   picks, and `download_book` is called once per exact reference; the queue serializes them.
-6. **Download timeout.** Keep the single global `--timeout` (examples and `--print-config` use 120 s with
-   downloads), or add a separate per-download deadline to the library? *Recommended: the global one for v1.*
-   Revisit if users hit transfer timeouts.
-7. **Catalog reads during transfers.** Use an anonymous public client for public reads while a transfer holds the
-   account (results lose `is_favorite`), and let account reads fail with `client_busy` after 10 s? *Recommended:
-   yes.* It keeps search usable during downloads without sharing cookies between two signed-in clients, which is
-   unverified upstream.
-8. **Tier B timing.** Ship 2026-07-28 support after v1? *Recommended: yes.* Tier A works with Claude Code
-   (fallback), Codex (legacy default) and Claude Desktop today.
+The owner accepted every recommendation, with one addition to the first:
+
+1. **Gate on downloads:** yes, `download_book` and `resume_downloads` are gated by default, and
+   `--no-download-confirmation` turns that gate off (account changes stay gated).
+2. **File paths:** yes, only paths inside `--download-dir` are returned.
+3. **Download lifetime:** tied to the MCP process for v1, documented; `--api-url` delegation later.
+4. **Password login:** no; restore the saved session or run anonymously.
+5. **Batch tools:** not in v1.
+6. **Download timeout:** the global `--timeout` for v1 (120 s in examples).
+7. **Catalog reads during transfers:** an anonymous public client for public reads; account reads fail with
+   `client_busy` after 10 s.
+8. **Tier B (2026-07-28):** a separate PR after v1.
 
 ---
 

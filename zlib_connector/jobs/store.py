@@ -365,6 +365,14 @@ class TaskStore:
             self._publish((*self._entries, (key, task)))
             return task
 
+    def find(self, idempotency_key: str) -> DownloadTask | None:
+        """Return the task recorded for this idempotency key, without creating one."""
+        key = hashlib.sha256(validate_idempotency_key(idempotency_key).encode("ascii")).hexdigest()
+        with self._mutex:
+            self._check()
+            identifier = self._keys.get(key)
+            return None if identifier is None else self._tasks[identifier]
+
     def get(self, identifier: str) -> DownloadTask:
         identifier = validate_task_id(identifier)
         with self._mutex:

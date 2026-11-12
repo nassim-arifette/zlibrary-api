@@ -15,6 +15,7 @@ from .booklists import BooklistSettings, booklist_entry_id, booklist_id, validat
 from .pagination import validate_page
 from .my_library import validate_tags
 from .http_cli import run_server
+from .mcp_cli import run_mcp
 from .cli_jobs import run_jobs
 from .cli_tui import run_tui
 from .cli_progress import ProgressDisplay
@@ -94,6 +95,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.command != "download" or any(value.startswith("-") for value in extras):
             command_parser.error("unrecognized arguments: " + " ".join(extras))
         args.query = [*args.query, *extras]
+    if args.command == "mcp":
+        return run_mcp(args, client_factory=Client)
     try:
         if args.command == "download":
             if is_batch(args):

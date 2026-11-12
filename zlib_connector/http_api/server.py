@@ -73,7 +73,8 @@ def _query_parameters(raw_query):
     return query
 
 
-def _upstream_error(error, *, mutation):
+def upstream_error(error, *, mutation):
+    """Map a library exception to a safe RequestError; mutations never claim not_applied on doubt."""
     if isinstance(error, BooklistNotFoundError):
         return RequestError(404, "booklist_not_found", "The booklist was not found in the account's editable lists.")
     if isinstance(error, MutationUncertainError):
@@ -86,21 +87,24 @@ def _upstream_error(error, *, mutation):
         return RequestError(429, "upstream_rate_limited", "Z-Library rejected the request because of a limit.", retryable=not mutation)
     if isinstance(error, NetworkError):
         if mutation:
-            return _upstream_error(MutationUncertainError(), mutation=True)
+            return upstream_error(MutationUncertainError(), mutation=True)
         timeout = error.reason == "timeout"
         return RequestError(504 if timeout else 502, "upstream_timeout" if timeout else "upstream_network_error",
                             "The Z-Library request could not be completed.", retryable=True)
     if isinstance(error, FormatChangedError):
         if mutation:
-            return _upstream_error(MutationUncertainError(), mutation=True)
+            return upstream_error(MutationUncertainError(), mutation=True)
         return RequestError(502, "upstream_protocol_changed", "Z-Library returned an unsupported response.")
     if isinstance(error, DownloadError):
         return RequestError(422, "upstream_refused", "Z-Library refused the operation.")
     if mutation:
-        return _upstream_error(MutationUncertainError(), mutation=True)
+        return upstream_error(MutationUncertainError(), mutation=True)
     return RequestError(502 if isinstance(error, ConnectorError) else 500,
                         "upstream_error" if isinstance(error, ConnectorError) else "internal_error",
                         "The request could not be completed.")
+
+
+_upstream_error = upstream_error
 
 
 def _allowed_origin(value):
