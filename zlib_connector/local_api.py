@@ -23,6 +23,8 @@ from .transfer import CancellationToken
 
 
 JSON_LIMIT = 2 * 1024 * 1024
+# The local server answers 414 to a longer encoded query string.
+MAX_QUERY_LENGTH = 4096
 _FILE_TYPES = {"application/pdf": "pdf", "application/epub+zip": "epub", "image/vnd.djvu": "djvu"}
 _STATUS_MESSAGES = {
     400: "The local API rejected the request. Check its arguments.",
@@ -89,7 +91,10 @@ class LocalAPI:
             cancel.check()
         target = "/v1" + path
         if query:
-            target += "?" + urlencode(query)
+            encoded = urlencode(query)
+            if len(encoded) > MAX_QUERY_LENGTH:
+                raise ValueError("The local API request exceeds its size limit.")
+            target += "?" + encoded
         data = json.dumps(body, ensure_ascii=True).encode("ascii") if body is not None else None
         if data is not None and len(data) > 65536:
             raise ValueError("The local API request exceeds its size limit.")

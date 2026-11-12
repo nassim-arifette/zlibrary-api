@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 import threading
 from typing import Callable
 
+from ..catalog_schema import InvalidCatalogData
 from ..errors import NetworkError
 from ..transfer import CancellationToken, TransferCancelled
 
@@ -22,20 +23,28 @@ class _Request:
 
 
 def _failure(error: Exception) -> str:
+    """A safe reason for a failed read; the page offers r to retry."""
     status = getattr(error, "status", None)
+    if status == 400:
+        return "The local API rejected this request. Change it, then try again."
     if status in (401, 403):
-        return "Access denied. Use the running server's token file, then refresh."
+        return "Access denied. Use the running server's token file, then retry."
+    if status in (502, 504):
+        return "Z-Library did not complete the request. Wait, then retry."
     if status == 503:
-        return "The server is busy or unavailable. Wait, then refresh."
+        return "The server is busy or unavailable. Wait, then retry."
     if status == 424:
-        return "The account session is unavailable. Run zlib-cli login, restart zlib-cli serve, then refresh."
+        return ("The server has no signed-in Z-Library session. Run zlib-cli login if needed, then restart "
+                "zlib-cli serve without --anonymous and retry.")
     if status == 429:
-        return "The service is limiting requests. Wait before refreshing."
+        return "The service is limiting requests. Wait before retrying."
     if status in (404, 410):
-        return "This collection or book is unavailable. Go back or refresh."
+        return "This collection or book is unavailable. Go back or retry."
+    if isinstance(error, InvalidCatalogData):
+        return "The server sent data this version cannot read. Update both, or retry."
     if isinstance(error, NetworkError):
-        return "Could not reach the server. Start zlib-cli serve and check its address, then refresh."
-    return "Could not load this view. Refresh to try again."
+        return "Could not reach the server. Start zlib-cli serve and check its address, then retry."
+    return "The request failed. Retry, or go back."
 
 
 class BoundedLoader:

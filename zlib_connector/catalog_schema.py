@@ -11,8 +11,15 @@ from .terminal_text import terminal_text
 MAX_ROWS = 1000
 
 
+MAX_PAGE_LIMIT = 50  # The local API's largest page size.
+
+
+class InvalidCatalogData(NetworkError):
+    """The local API answered, but with data this client does not accept."""
+
+
 def invalid_catalog():
-    raise NetworkError("The local API returned invalid catalog data.") from None
+    raise InvalidCatalogData("The local API returned invalid catalog data.") from None
 
 
 def _record(value):
@@ -72,12 +79,19 @@ def book_page(value, *, page, limit=None, identifier=None):
     if not isinstance(rows, list) or len(rows) > MAX_ROWS:
         invalid_catalog()
     current = _number(pagination.get("page"), minimum=1, maximum=1000, nullable=False)
-    page_limit = _number(pagination.get("limit"), minimum=1, maximum=limit or MAX_ROWS, nullable=False)
+    # The server may echo a larger upstream page size than requested; only the rows must fit the request.
+    page_limit = _number(pagination.get("limit"), minimum=1, maximum=max(limit, MAX_PAGE_LIMIT) if limit else MAX_ROWS,
+                         nullable=False)
+    if limit is not None:
+        page_limit = min(page_limit, limit)
     if current != page or len(rows) > page_limit:
         invalid_catalog()
     total_items = _number(pagination.get("total_items"))
     total_pages = _number(pagination.get("total_pages"))
-    next_page = _number(pagination.get("next_page"), minimum=1, maximum=1000)
+    next_page = pagination.get("next_page")
+    if type(next_page) is int and next_page > 1000:
+        next_page = None  # Pages past 1000 cannot be requested; stop paging there instead of rejecting this page.
+    next_page = _number(next_page, minimum=1, maximum=1000)
     previous_page = _number(pagination.get("previous_page"), minimum=1, maximum=1000)
     if (total_items is not None and total_items < len(rows)
             or total_pages == 0 and (rows or next_page is not None or previous_page is not None)
@@ -102,6 +116,13 @@ def book_page(value, *, page, limit=None, identifier=None):
             invalid_catalog()
         books.append(BooklistBook(**fields, booklist_id=returned_id, entry_id=entry_id))
     return BookPage(tuple(books), current, page_limit, total_items, total_pages, next_page, previous_page)
+
+
+def books(value):
+    """Parse an unpaginated book list in server order; repeated rows are kept."""
+    if not isinstance(value, list) or len(value) > MAX_ROWS:
+        invalid_catalog()
+    return tuple(Book(**_book_fields(row)) for row in value)
 
 
 def booklists(value):

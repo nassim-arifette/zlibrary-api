@@ -185,10 +185,11 @@ zlib-cli tags add ID:HASH "To read" "Science"
 
 ## Browse in the terminal
 
-An optional, read-only terminal interface shows your favorites, booklists, download history and book
-details; it does not change your account or start downloads. It reads from the local HTTP API: start
-a signed-in server (not `--anonymous`), then the interface in a second terminal with the virtual
-environment active. Press `?` for the keys and `q` to quit.
+An optional terminal interface lets you search the catalog with filters, see popular, recommended
+and similar books, and browse your favorites, booklists and download history. It only reads: it
+does not change your account or start downloads. It talks to the local HTTP API, so start a
+signed-in server (not `--anonymous`), then the interface in a second terminal with the virtual
+environment active.
 
 ```sh
 python -m pip install -e ".[tui]"
@@ -197,7 +198,11 @@ zlib-cli serve
 zlib-cli tui
 ```
 
-The [TUI guide](docs/tui.md) covers views, options and troubleshooting.
+![The terminal interface showing a favorites list, with the selected book's details above it](docs/images/tui.png)
+
+It opens on Home. Press `s` to search, `/` for the list of commands, Enter to open a book, `m` for
+more like it, Esc to go back, `?` for help and `q` to quit. The [TUI guide](docs/tui.md) covers every
+page, key and option.
 
 ## Sign-in and privacy
 
@@ -329,8 +334,8 @@ Version 0.1.0: everything described above works today. Planned, without dates:
 
 - Booklists: moving books between lists, import and export, browsing public lists.
 - Reading lists through the HTTP API and the terminal interface (today: CLI and Python only).
-- In the terminal interface: search, collection editing, account views and live download-task
-  updates (today it only browses).
+- In the terminal interface: collection editing, downloads, account views and live download-task
+  updates (today it searches and browses).
 - The website's full My Library page, browsable and searchable by tag.
 - HTTP login and logout, a live feed for the whole download queue, resuming partial downloads.
 - Uploads, once Z-Library's upload flow has been checked.
@@ -344,7 +349,7 @@ recent-additions view, and deleting download tasks or importing a booklist into 
 - [Technical reference](docs/reference.md): CLI rules in detail, the Python API, list and
   progress-file formats, safeguards.
 - [HTTP API](docs/http-api.md), [download tasks](docs/download-tasks.md) and the
-  [collections TUI](docs/tui.md).
+  [terminal interface](docs/tui.md).
 
 ## Development
 
