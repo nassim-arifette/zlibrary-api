@@ -86,9 +86,14 @@ def private_lock(path: Path, timeout: float):
             try:
                 source, identity = _open_lock(path)
             except OSError as error:
-                # Another creator's initial private handle briefly denies write sharing.
-                if os.name == "nt" and getattr(error, "winerror", None) == 32:
-                    _pause(deadline)
+                # Another creator's initial private handle briefly denies write sharing. Windows reports it
+                # as a sharing violation (32), or through the C runtime as EACCES without a winerror.
+                if os.name == "nt" and (getattr(error, "winerror", None) == 32 or (
+                        isinstance(error, PermissionError) and getattr(error, "winerror", None) is None)):
+                    try:
+                        _pause(deadline)
+                    except PrivateLockTimeout:
+                        raise PrivateLockError from None  # Still refused: not another writer, a real failure.
                     continue
                 raise PrivateLockError from None
             except ValueError:
