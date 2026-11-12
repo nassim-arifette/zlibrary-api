@@ -794,6 +794,13 @@ and [observed response models](https://github.com/heartleo/zlib/blob/main/docs/a
 - Remote metadata is stripped of terminal control characters. Raw server error
   bodies, credentials and session tokens are never shown.
 
+The MCP server (`zlib-cli mcp`, see the [MCP guide](mcp.md)) applies the same
+rules to AI assistants over stdio: read-only tools by default, downloads only
+into `--download-dir` and only for an exact `ID:HASH`, account changes only with
+`--allow-account-changes`, approval prompts on every quota-using or
+account-changing call, no automatic retry, restore-only sign-in and literal,
+control-free metadata. stdout carries protocol messages only.
+
 ## Verification
 
 ```powershell

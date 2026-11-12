@@ -22,7 +22,8 @@ def _new_manager(client, directory, *, client_lock, max_tasks):
     return DownloadManager(client, directory, client_lock=client_lock, max_tasks=max_tasks)
 
 
-def _job_error(error, *, mutation=False):
+def job_error(error, *, mutation=False):
+    """Map a task-store exception to a safe RequestError."""
     if isinstance(error, JobNotFoundError):
         return RequestError(404, "download_not_found", "The download task does not exist.")
     if isinstance(error, JobConflictError):
@@ -37,6 +38,9 @@ def _job_error(error, *, mutation=False):
         return RequestError(503, "downloads_busy", "The download manager is unavailable or stopping.", retryable=True)
     return RequestError(503, "download_storage_error", "The download task state could not be accessed safely.",
                         outcome="unknown" if mutation else "not_applied")
+
+
+_job_error = job_error
 
 
 @dataclass(frozen=True)

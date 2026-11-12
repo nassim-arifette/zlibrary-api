@@ -1,8 +1,9 @@
 # Zlibrary API
 
-An unofficial Z-Library client: the `zlib-cli` command-line tool, a local HTTP API, an optional
-terminal interface and a Python library (package `zlib-connector`, import `zlib_connector`). Find
-books, download one or a whole reading list, and manage your favorites, booklists and tags.
+An unofficial Z-Library client: the `zlib-cli` command-line tool, a local HTTP API, an MCP server
+for AI assistants, an optional terminal interface and a Python library (package `zlib-connector`,
+import `zlib_connector`). Find books, download one or a whole reading list, and manage your
+favorites, booklists and tags.
 
 > **Unofficial client.** This project is not affiliated with Z-Library. It relies on unofficial
 > interfaces that can change or break without notice, and which domains work depends on your
@@ -292,6 +293,19 @@ quota runs out, the queue pauses until you run `zlib-cli jobs resume`. Stopping 
 interrupts the current download, which is not retried. See the
 [download task guide](docs/download-tasks.md).
 
+## Use it from an AI assistant (MCP)
+
+```sh
+claude mcp add --transport stdio --scope user zlib -- zlib-cli mcp
+codex mcp add zlib -- zlib-cli mcp
+```
+
+`zlib-cli mcp` lets Claude Code, Claude Desktop or Codex search books and read your favorites, history,
+booklists and quota, using the session saved by `login`. It is read-only by default: `--download-dir DIR`
+adds downloads into that folder and `--allow-account-changes` adds favorite, tag and booklist changes, and the
+assistant asks you before each of these calls (`--no-download-confirmation` stops asking for downloads only).
+Downloads take one exact edition and are never retried automatically. The [MCP guide](docs/mcp.md) covers registration for each client, the tools and the safeguards.
+
 ## Python library
 
 ```python
@@ -338,6 +352,8 @@ Version 0.1.0: everything described above works today. Planned, without dates:
   updates (today it searches and browses).
 - The website's full My Library page, browsable and searchable by tag.
 - HTTP login and logout, a live feed for the whole download queue, resuming partial downloads.
+- In the MCP server: the stateless 2026-07-28 protocol revision, and downloads that outlive the assistant by
+  sharing a running `zlib-cli serve` queue.
 - Uploads, once Z-Library's upload flow has been checked.
 
 Not supported: formats other than PDF, EPUB and DjVu, files over 256 MiB, browser verification, HTTP
@@ -348,8 +364,8 @@ recent-additions view, and deleting download tasks or importing a booklist into 
 
 - [Technical reference](docs/reference.md): CLI rules in detail, the Python API, list and
   progress-file formats, safeguards.
-- [HTTP API](docs/http-api.md), [download tasks](docs/download-tasks.md) and the
-  [terminal interface](docs/tui.md).
+- [HTTP API](docs/http-api.md), [download tasks](docs/download-tasks.md), the
+  [MCP server](docs/mcp.md) and the [terminal interface](docs/tui.md).
 
 ## Development
 

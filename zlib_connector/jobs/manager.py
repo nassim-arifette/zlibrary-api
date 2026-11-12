@@ -152,6 +152,13 @@ class DownloadManager:
             self._condition.notify_all()
             return self._view(task)
 
+    def find(self, idempotency_key):
+        """Look up the task of an idempotency key; never creates a task or contacts the service."""
+        with self._condition:
+            self._available()
+            task = self._store.find(idempotency_key)
+            return None if task is None else self._view(task)
+
     def get(self, task_id):
         with self._condition:
             self._available()
@@ -205,6 +212,21 @@ class DownloadManager:
             receipt = task.receipt
         with self._files.open(task_id, receipt) as file:
             yield file
+
+    def file_path(self, task_id):
+        """Return the absolute path of a succeeded task's file after the identity checks of open_file.
+
+        Raises JobStateError when the task has no completed file and JobFileError
+        when the file was removed, replaced or changed.
+        """
+        with self._condition:
+            self._available()
+            task = self._store.get(task_id)
+            if task.state != "succeeded" or task.receipt is None:
+                raise JobStateError("The task has no completed file.")
+            receipt = task.receipt
+        with self._files.open(task_id, receipt):
+            return self._files.directory / task_id / receipt.name
 
     def close(self):
         if threading.current_thread() is getattr(self, "_thread", None):

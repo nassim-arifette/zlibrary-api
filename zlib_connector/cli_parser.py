@@ -6,6 +6,7 @@ from .client import SUPPORTED_FORMATS
 from .library import FAVORITE_ORDERS, HISTORY_ORDERS
 from .search import SEARCH_ORDERS
 from .http_cli import add_serve_parser
+from .mcp_cli import add_mcp_parser
 from .cli_progress import add_progress_options
 from .cli_session import add_session_options
 from .cli_jobs import add_jobs_parser
@@ -139,4 +140,5 @@ def parser() -> argparse.ArgumentParser:
     doctor.add_argument("--json", action="store_true")
     commands.add_parser("domains", help="list known candidates without probing them").add_argument("--json", action="store_true")
     add_serve_parser(commands)
+    add_mcp_parser(commands)
     return result

@@ -215,7 +215,8 @@ Private metadata lives under `.zlib-jobs/<account-scope>/tasks.json` in the root
 The scope is an HMAC of the exact domain and account ID using a private local key;
 the journal stores neither raw account IDs nor authentication cookies. Keep the
 root's `.zlib-jobs/scope-key`: a missing key with existing journals stops startup.
-Only one manager can own an account journal at a time. The file is replaced
+Only one manager can own an account journal at a time. The MCP server (`zlib-cli mcp --download-dir`, see [MCP](mcp.md)) uses the same
+journal, so `serve` and `mcp` cannot share one folder for the same account at the same time. The file is replaced
 atomically; progress is persisted at state transitions and overlaid in memory
 during a transfer.
 
