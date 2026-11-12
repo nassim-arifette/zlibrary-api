@@ -16,7 +16,7 @@ zlib-cli [--domain ORIGIN] [--timeout SECONDS] [--session-file FILE] mcp
          [--print-config {claude-code,claude-desktop,codex}]
 ```
 
-`python -m zlib_connector mcp` is the same command. Global options always go **before** `mcp`.
+`python -m zlib_connector mcp` is the same command. Global options work before or after `mcp`.
 
 | Flag | Effect |
 |---|---|

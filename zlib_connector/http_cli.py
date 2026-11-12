@@ -12,6 +12,7 @@ from .http_api.server import _allowed_origin
 from .api_token import load_api_token
 from .local_state import state_directory
 from .cli_session import AccountSession
+from .cli_terminal import InputPolicy
 
 
 def add_serve_parser(commands):
@@ -71,7 +72,7 @@ def _validate_listener(args):
 
 
 def run_server(args, *, client_factory=Client, credentials_loader=load_credentials,
-               prompt=_prompt, password_prompt=_password_prompt, server_factory=create_server):
+               prompt=_prompt, password_prompt=_password_prompt, server_factory=create_server, policy=None):
     """Bind before prompting/login; close server workers before its Client.
 
     KeyboardInterrupt deliberately propagates after cleanup so the CLI can
@@ -82,6 +83,8 @@ def run_server(args, *, client_factory=Client, credentials_loader=load_credentia
     token_path = (args.token_file or state_directory() / "api-token").expanduser().absolute()
     token = load_api_token(token_path)
     account = AccountSession(args, credentials_loader=credentials_loader)
+    # Refuse a sign-in prompt that cannot be answered before the port is bound.
+    account.require_input(InputPolicy.from_args(args) if policy is None else policy, explicit=False)
     with client_factory(account.domain, timeout=args.timeout) as client:
         with server_factory(client, token=token, host=args.host, port=args.port,
                             allowed_origins=args.allow_origin) as server:

@@ -152,7 +152,7 @@ class LibraryCliTests(unittest.TestCase):
                         ["booklists", "show", "../private"]):
             with self.subTest(command=command), patch("zlib_connector.cli.load_credentials") as load, \
                     patch("sys.stderr", io.StringIO()):
-                self.assertEqual(main(command), 1)
+                self.assertEqual(main(command), 2)
             load.assert_not_called()
 
 

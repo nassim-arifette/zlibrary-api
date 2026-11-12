@@ -87,7 +87,7 @@ class BatchCliTests(unittest.TestCase):
         for args in cases:
             with self.subTest(args=args):
                 code, out, errors, _, constructor, prompt, loader = self.run_cli(args)
-                self.assertEqual(code, 1)
+                self.assertEqual(code, 2)
                 self.assertEqual(out, "")
                 constructor.assert_not_called()
                 loader.assert_not_called()
@@ -100,11 +100,10 @@ class BatchCliTests(unittest.TestCase):
         self.assertIn("contains no items", errors)
         code, _, _, _, constructor, _, _ = self.run_cli(["download", "A", "B", "--output", str(self.folder / "missing")],
                                                         output=False)
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 2)
         for args in (["download", "--format", "mobi", "A"], ["download", "A", "--formt", "x"]):
-            with self.subTest(args=args), patch("sys.stderr", io.StringIO()), self.assertRaises(SystemExit) as caught:
-                main(args)
-            self.assertEqual(caught.exception.code, 2)
+            with self.subTest(args=args), patch("sys.stderr", io.StringIO()):
+                self.assertEqual(main(args), 2)  # Usage errors are reported, not raised.
 
     def test_titles_may_follow_options_and_lines_report_each_item(self):
         client = BatchClient({"dune": [book(1, title="Dune")], "neuromancer": [book(2, title="Neuromancer")]})
@@ -140,14 +139,14 @@ class BatchCliTests(unittest.TestCase):
         code, out, errors, _, constructor, *_ = self.run_cli(["download", "-a", str(listed), "--pick", "1", "--yes",
                                                               "--output", str(other)], BatchClient(results),
                                                              output=False)
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 2)
         self.assertIn(f"The report recorded its books in {self.folder}, and none of them is in {other}.", errors)
         constructor.assert_not_called()
         code, out, _, fresh, *_ = self.run_cli(["download", "-a", str(listed), "--pick", "1", "--yes", "--no-report"],
                                                BatchClient(results))
         self.assertEqual(fresh.kinds("download"), ["1:h1", "2:h2"])
         code, _, errors, *_ = self.run_cli(["download", "-a", str(report), "--yes"], BatchClient(results))
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 2)
         self.assertIn("1 item needs a search result choice", errors)
         code, out, _, reused, *_ = self.run_cli(["download", "-a", str(report), "--yes", "--pick", "1"],
                                                 BatchClient(results))
@@ -266,7 +265,7 @@ class BatchCliTests(unittest.TestCase):
         stdin = io.TextIOWrapper(io.BytesIO("Dune\n".encode()), encoding="utf-8")
         code, out, errors, _, constructor, _, _ = self.run_cli(["download", "-a", "-", "--pick", "1", "--yes"],
                                                                stdin=stdin, credentials=Credentials(ORIGIN))
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 2)
         self.assertIn("saved session", errors)
         self.assertEqual(stdin.buffer.tell(), 0)
         constructor.assert_not_called()
@@ -277,7 +276,7 @@ class BatchCliTests(unittest.TestCase):
         self.assertEqual(client.kinds("search"), ["Dune", "Les Misérables"])
         csv_input = io.TextIOWrapper(io.BytesIO(b"title,author\nDune,Herbert\n"), encoding="utf-8")
         code, _, errors, *_ = self.run_cli(["download", "-a", "-", "--pick", "1", "--yes"], stdin=csv_input)
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 2)
         self.assertIn("--batch-format csv", errors)
         csv_input = io.TextIOWrapper(io.BytesIO(b"title,author\nDune,Herbert\n"), encoding="utf-8")
         code, _, _, client, *_ = self.run_cli(["download", "-a", "-", "--batch-format", "csv", "--pick", "1", "--yes"],
@@ -288,7 +287,7 @@ class BatchCliTests(unittest.TestCase):
         results = {"a": [book(1)], "b": [book(2)]}
         code, out, errors, client, *_ = self.run_cli(["download", "A", "B", "--pick", "1", "--yes"],
                                                      BatchClient(results, remaining=1))
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 2)
         self.assertIn("--report FILE", errors)
         self.assertEqual(client.kinds("download"), [])
         code, out, errors, client, *_ = self.run_cli(["download", "A", "B", "--pick", "1", "--yes", "--no-report"],
@@ -325,12 +324,12 @@ class BatchCliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         plain = self.write("list.json", '["Dune"]')
         code, _, errors, *_ = self.run_cli(["download", "-a", str(plain), "--report", str(plain), "--pick", "1", "--yes"])
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 2)
         self.assertEqual(plain.read_text(encoding="utf-8"), '["Dune"]')
         broken = self.write("broken.json", "{}")
         code, _, errors, _, constructor, _, _ = self.run_cli(["download", "-a", str(listed), "--report", str(broken),
                                                               "--pick", "1", "--yes"])
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 2)
         self.assertEqual(broken.read_text(encoding="utf-8"), "{}")
         constructor.assert_not_called()
 
@@ -410,7 +409,7 @@ class BatchCliTests(unittest.TestCase):
                              (["download", "-a", str(backup), "--pick", "1", "--yes"], "a credentials setting")):
             with self.subTest(args=args[:2]), patch("zlib_connector.cli_batch.DEFAULT_FILE", default):
                 code, out, errors, _, constructor, prompt, loader = self.run_cli(args)
-                self.assertEqual(code, 1)
+                self.assertEqual(code, 2)
                 self.assertIn(reason, errors)
                 self.assertNotIn("other-secret", out + errors)
                 self.assertNotIn("reader@example.com", out + errors)
@@ -499,14 +498,14 @@ class BatchCliTests(unittest.TestCase):
         stdin = terminal(io.TextIOWrapper(io.BytesIO(b"Dune\n"), encoding="utf-8"))
         code, out, errors, _, constructor, _, loader = self.run_cli(["download", "-a", "-", "--pick", "1"],
                                                                     stdin=stdin, tty=True)
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 2)
         self.assertIn("--yes", errors)
         self.assertEqual(stdin.buffer.tell(), 0)
         loader.assert_not_called()
         constructor.assert_not_called()
         listed = self.write("list.txt", "Dune\n")
         code, *_ = self.run_cli(["download", "-a", str(listed), "--pick", "1"])
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 2)
         self.assertFalse((self.folder / "list.progress.json.lock").exists())
 
     def test_lookups_are_paced_when_a_terminal_run_uses_pick(self):
@@ -634,7 +633,7 @@ class BatchCliTests(unittest.TestCase):
         plan = self.write("plan.json", out)
         code, _, errors, _, constructor, _, loader = self.run_cli(["download", "-a", str(plan), "--yes"],
                                                                   BatchClient(results))
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 2)
         self.assertIn("Downloading a plan needs --report FILE or --no-report", errors)
         constructor.assert_not_called()
         loader.assert_not_called()
@@ -665,7 +664,7 @@ class BatchCliTests(unittest.TestCase):
             return io.TextIOWrapper(io.BytesIO(text.encode()), encoding="utf-8")
 
         code, _, errors, _, constructor, *_ = self.run_cli(["download", "-a", "-", "--yes"], stdin=piped(plan))
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 2)
         self.assertIn("Downloading a plan needs --report FILE or --no-report", errors)
         constructor.assert_not_called()
         code, _, _, client, *_ = self.run_cli(["download", "-a", "-", "--yes", "--report", str(report)],
@@ -676,7 +675,7 @@ class BatchCliTests(unittest.TestCase):
         self.assertEqual(again.kinds("download"), ["3:h3"])
         code, _, errors, _, constructor, *_ = self.run_cli(["download", "-a", "-", "--yes"],
                                                            stdin=piped(report.read_text(encoding="utf-8")))
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 2)
         self.assertIn("Downloading a report from standard input needs --report FILE or --no-report", errors)
         constructor.assert_not_called()
         code, _, _, client, *_ = self.run_cli(["download", "-a", "-", "--yes", "--no-report"], BatchClient(results),
@@ -690,7 +689,7 @@ class BatchCliTests(unittest.TestCase):
         plan = self.write("plan.txt", out)  # Instead of plan.json, for example to edit it in Notepad.
         code, _, errors, _, constructor, prompt, loader = self.run_cli(["download", "-a", str(plan), "--pick", "1",
                                                                         "--yes"])
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 2)
         self.assertIn("This list holds JSON, such as a plan or a report; name it .json or use --batch-format json.",
                       errors)
         constructor.assert_not_called()
@@ -712,7 +711,7 @@ class BatchCliTests(unittest.TestCase):
                     ["download", "-a", str(listed), "--pick", "1", "--yes", *extra, "--output", str(other)],
                     BatchClient(results, remaining=1), output=False)
                 message = json.loads(errors)["message"] if "--json" in extra else errors
-                self.assertEqual(code, 1)
+                self.assertEqual(code, 2)
                 self.assertIn(f"{where}. Pass --output with that folder to continue this list there", message)
                 constructor.assert_not_called()
                 self.assertEqual(report.read_bytes(), before)
@@ -785,7 +784,7 @@ class BatchCliTests(unittest.TestCase):
                 for extra in ([], ["--redownload-missing"]):  # Nothing landed there, so scripts are still refused.
                     code, _, errors, _, constructor, *_ = self.run_cli([*command, "--yes", *extra],
                                                                        BatchClient(results), output=False)
-                    self.assertEqual(code, 1)
+                    self.assertEqual(code, 2)
                     self.assertIn(where, errors)
                     constructor.assert_not_called()
         code, _, _, client, *_ = self.run_cli(command, BatchClient(results), answers=["y"], tty=True, output=False)
@@ -799,14 +798,14 @@ class BatchCliTests(unittest.TestCase):
         results = {"a": [book(1)], "b": [book(2)], "c": [book(3)]}
         code, _, errors, client, *_ = self.run_cli(["download", "A", "B", "C", "--pick", "1", "--yes",
                                                     "--max-downloads", "1"], BatchClient(results))
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 2)
         self.assertIn("--max-downloads 1 is lower than the 3 books planned", errors)
         self.assertIn("--no-report to download only 1", errors)
         self.assertEqual(client.kinds("download"), [])
         stdin = io.TextIOWrapper(io.BytesIO(b"A\nB\nC\n"), encoding="utf-8")
         code, _, errors, client, *_ = self.run_cli(["download", "-a", "-", "--pick", "1", "--yes", "--max-downloads",
                                                     "2"], BatchClient(results), stdin=stdin)
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 2)
         self.assertEqual(client.kinds("download"), [])
         code, out, _, client, *_ = self.run_cli(["download", "A", "B", "C", "--pick", "1", "--yes", "--max-downloads",
                                                  "1", "--no-report"], BatchClient(results))
@@ -845,7 +844,7 @@ class BatchCliTests(unittest.TestCase):
                       out)
         plan.write_bytes(b"")  # What "-a plan.json --dry-run --json > plan.json" leaves behind.
         code, _, errors, *_ = self.run_cli(["download", "-a", str(plan), "--dry-run"])
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 2)
         self.assertIn("The JSON list is empty. Redirecting a command's output into the file it reads", errors)
 
     def test_a_file_over_the_size_limit_is_reported_without_retry_advice(self):
@@ -872,9 +871,9 @@ class BatchCliTests(unittest.TestCase):
         for mode in ("r", "w"):
             with open(os.devnull, mode) as stream:  # On Windows, isatty() is true for NUL.
                 self.assertFalse(_tty(stream))
-        with patch("zlib_connector.cli_batch._console", return_value=False):
+        with patch("zlib_connector.cli_terminal._console", return_value=False):
             code, _, errors, _, constructor, prompt, _ = self.run_cli(["download", "A", "B", "--yes"], tty=True)
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 2)
         self.assertIn("2 items need a search result choice. Use --pick N", errors)
         constructor.assert_not_called()
         prompt.assert_not_called()

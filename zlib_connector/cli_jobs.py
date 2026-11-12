@@ -1,11 +1,11 @@
 """CLI operations on the download tasks of an existing local API server."""
-import argparse
 from contextlib import closing
-import json
 import math
+import sys
 from pathlib import Path
 import time
 
+from .cli_output import CommandError, print_json
 from .errors import NetworkError
 from .jobs.events import validate_event_id
 from .local_api import LocalAPI, task_id
@@ -17,11 +17,9 @@ def add_jobs_parser(commands):
     command = commands.add_parser("jobs", help="manage downloads on a running local API server")
     command.add_argument("--api-url", default="http://127.0.0.1:8000/v1", help="loopback HTTP API address")
     command.add_argument("--token-file", type=Path, help="existing server token file (default: state directory/api-token)")
-    command.add_argument("--json", action="store_true")
     actions = command.add_subparsers(dest="job_action", required=True)
     for name in ("add", "list", "show", "cancel", "resume", "file", "watch"):
         action = actions.add_parser(name)
-        action.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
         if name in ("show", "cancel", "file", "watch"):
             action.add_argument("task_id", type=task_id)
         if name == "add":
@@ -37,7 +35,27 @@ def add_jobs_parser(commands):
             action.add_argument("--after", help="last observed event cursor; reconnects receive current state")
 
 
-def run_jobs(args):
+_UNAVAILABLE = {
+    "add": ("unknown", "Run the same command again with the same --key: the server replays it and never adds a"
+                       " second download."),
+    "cancel": ("unknown", "Check with: zlib-cli jobs show {task_id}"),
+    "resume": ("unknown", "Check with: zlib-cli jobs list"),
+}
+_READ_HINT = "Start the server: zlib-cli serve --download-dir DIR"
+
+
+def run_jobs(args) -> int:
+    """Return the exit status: 0, or for watch 0, 3 or 4 (docs/cli-json.md)."""
+    try:
+        return _run(args)
+    except NetworkError as error:
+        outcome, hint = _UNAVAILABLE.get(args.job_action, ("not_applied", _READ_HINT))
+        raise CommandError(str(error), code="local_api_unavailable", name=type(error).__name__, outcome=outcome,
+                           reason=getattr(error, "reason", None),
+                           hint=hint.format(task_id=getattr(args, "task_id", ""))) from None
+
+
+def _run(args) -> int:
     if args.job_action == "watch":
         task_id(args.task_id)
         if type(args.duration) not in (int, float) or not 1 <= args.duration <= 3600 or not math.isfinite(args.duration):
@@ -52,8 +70,17 @@ def run_jobs(args):
             raise ValueError("The HTTP API accepts offsets up to 10000.")
     api = LocalAPI(args.api_url, args.token_file or state_directory() / "api-token", timeout=args.timeout)
     if args.job_action == "watch":
-        _watch(api, args)
-        return
+        state = _watch(api, args)
+        if state == "succeeded":
+            return 0
+        if state is not None:
+            if not args.json:
+                print(f"The task ended in state {state}.", file=sys.stderr, flush=True)
+            return 4
+        if not args.json:
+            print("Stopped watching before the task finished. Run the same command to keep watching.",
+                  file=sys.stderr, flush=True)
+        return 3
     path = "/downloads"
     if args.job_action == "add":
         value = api.request("POST", path, body={"reference": args.reference, "idempotency_key": args.key})
@@ -67,7 +94,7 @@ def run_jobs(args):
         path += "/" + args.task_id
         value = api.request("POST", path + "/cancel") if args.job_action == "cancel" else api.request("GET", path)
     if args.json:
-        print(json.dumps(value, ensure_ascii=False))
+        print_json(value)
     elif "tasks" in value:
         for item in value["tasks"]:
             print(f"{item['id']}  {item['state']:<14}  {item['reference']}")
@@ -80,16 +107,18 @@ def run_jobs(args):
         print(f"Queue resumed; {value['resumed']} task(s) requeued after quota wait.")
     else:
         print(value["path"])
+    return 0
 
 
 def _watch(api, args):
+    """Return the terminal state observed, or None when the observation time ended first."""
     deadline = time.monotonic() + args.duration
     after = args.after
     first_stream = True
     while True:
         remaining = deadline - time.monotonic()
         if remaining <= 0 or (remaining < 1 and not first_stream):
-            return
+            return None
         first_stream = False
         # The extra deadline caps all streams together, including connection
         # setup and a server that exceeds its requested observation duration.
@@ -98,7 +127,7 @@ def _watch(api, args):
                 for event in stream:
                     after = event["id"]
                     if args.json:
-                        print(json.dumps(event, ensure_ascii=False), flush=True)
+                        print_json(event)
                     else:
                         task = event["task"]
                         line = f"{task['id']}  {task['state']:<14}  {task['reference']}"
@@ -112,10 +141,10 @@ def _watch(api, args):
                             line += "  queue paused"
                         print(line, flush=True)
                     if event["task"]["state"] in TERMINAL_STATES:
-                        return
+                        return event["task"]["state"]
             except NetworkError as error:
                 if error.reason == "timeout" and time.monotonic() >= deadline:
-                    return  # Only the caller's explicit observation budget ended.
+                    return None  # Only the caller's explicit observation budget ended.
                 raise
         # Only an explicit duration end can reach here without a terminal
         # observation. EOF, shutdown and protocol failures raise instead.

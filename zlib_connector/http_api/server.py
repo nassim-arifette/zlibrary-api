@@ -17,8 +17,8 @@ from time import monotonic
 from urllib.parse import parse_qsl, urlsplit
 
 from ..diagnostics import KNOWN_DOMAINS, diagnose_domains, _origin
-from ..errors import (AuthenticationError, BooklistNotFoundError, ChallengeRequired, ConnectorError, DownloadError,
-                      FormatChangedError, MutationUncertainError, NetworkError, RateLimitError)
+from ..error_codes import ErrorCode, classify
+from ..errors import ConnectorError
 from ..search import SearchFilters
 from ..my_library import validate_tags
 from .contract import ENDPOINTS, RequestError, openapi_document, resolve, validate_fields
@@ -73,35 +73,33 @@ def _query_parameters(raw_query):
     return query
 
 
+# HTTP status and fixed message for each code that classify() can return on a route.
+_UPSTREAM = {
+    "booklist_not_found": (404, "The booklist was not found in the account's editable lists."),
+    "mutation_uncertain": (409, "The server may have applied this change. Check the account before trying again."),
+    "upstream_authentication_required": (424, "The Z-Library session is missing or expired."),
+    "upstream_challenge": (502, "Z-Library requires browser verification."),
+    "upstream_rate_limited": (429, "Z-Library rejected the request because of a limit."),
+    "upstream_timeout": (504, "The Z-Library request could not be completed."),
+    "upstream_network_error": (502, "The Z-Library request could not be completed."),
+    "upstream_protocol_changed": (502, "Z-Library returned an unsupported response."),
+    "upstream_refused": (422, "Z-Library refused the operation."),
+    "upstream_error": (502, "The request could not be completed."),
+    "internal_error": (500, "The request could not be completed."),
+}
+
+
 def upstream_error(error, *, mutation):
     """Map a library exception to a safe RequestError; mutations never claim not_applied on doubt."""
-    if isinstance(error, BooklistNotFoundError):
-        return RequestError(404, "booklist_not_found", "The booklist was not found in the account's editable lists.")
-    if isinstance(error, MutationUncertainError):
-        return RequestError(409, "mutation_uncertain", "The server may have applied this change. Check the account before trying again.", outcome="unknown")
-    if isinstance(error, AuthenticationError):
-        return RequestError(424, "upstream_authentication_required", "The Z-Library session is missing or expired.")
-    if isinstance(error, ChallengeRequired):
-        return RequestError(502, "upstream_challenge", "Z-Library requires browser verification.")
-    if isinstance(error, RateLimitError):
-        return RequestError(429, "upstream_rate_limited", "Z-Library rejected the request because of a limit.", retryable=not mutation)
-    if isinstance(error, NetworkError):
+    result = classify(error, mutation=mutation)
+    if result.code not in _UPSTREAM:
+        # Local codes (sessions, cancellation, validation) keep the HTTP API's generic answers.
         if mutation:
-            return upstream_error(MutationUncertainError(), mutation=True)
-        timeout = error.reason == "timeout"
-        return RequestError(504 if timeout else 502, "upstream_timeout" if timeout else "upstream_network_error",
-                            "The Z-Library request could not be completed.", retryable=True)
-    if isinstance(error, FormatChangedError):
-        if mutation:
-            return upstream_error(MutationUncertainError(), mutation=True)
-        return RequestError(502, "upstream_protocol_changed", "Z-Library returned an unsupported response.")
-    if isinstance(error, DownloadError):
-        return RequestError(422, "upstream_refused", "Z-Library refused the operation.")
-    if mutation:
-        return upstream_error(MutationUncertainError(), mutation=True)
-    return RequestError(502 if isinstance(error, ConnectorError) else 500,
-                        "upstream_error" if isinstance(error, ConnectorError) else "internal_error",
-                        "The request could not be completed.")
+            result = ErrorCode("mutation_uncertain", outcome="unknown")
+        else:
+            result = ErrorCode("upstream_error" if isinstance(error, ConnectorError) else "internal_error")
+    status, message = _UPSTREAM[result.code]
+    return RequestError(status, result.code, message, retryable=result.retryable, outcome=result.outcome)
 
 
 _upstream_error = upstream_error

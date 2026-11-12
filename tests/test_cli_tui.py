@@ -17,7 +17,8 @@ from zlib_connector.cli_tui import VIEWS
 
 @contextmanager
 def terminal(interactive=True):
-    with patch("sys.stdin.isatty", return_value=interactive), patch("sys.stdout.isatty", return_value=interactive):
+    # The CLI's terminal test also checks the Windows console mode, so patch the test itself.
+    with patch("zlib_connector.cli_terminal.is_terminal", return_value=interactive):
         yield
 
 
@@ -78,21 +79,20 @@ class TUILaunchTests(unittest.TestCase):
             self.assertEqual(0, main(["tui", "--token-file", "chosen-token"]))
         self.assertEqual("home", app_factory.call_args.kwargs["initial_view"])
         for unknown in ("recently", "similar", "details"):
-            with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as exited:
-                main(["tui", "--view", unknown])
-            self.assertEqual(2, exited.exception.code)
+            with redirect_stderr(io.StringIO()):
+                self.assertEqual(2, main(["tui", "--view", unknown]))
         self.assertEqual(len(VIEWS) + 1, app_factory.call_count)
 
     def test_noninteractive_launch_fails_before_reading_token(self):
         code, _, error = self.invoke(["tui", "--token-file", "nonexistent-token"])
-        self.assertEqual(1, code)
+        self.assertEqual(2, code)  # input_required
         self.assertIn("interactive terminal", error)
 
     def test_invalid_page_size_fails_before_optional_import(self):
         for value in ("0", "51"):
             with self.subTest(value=value):
                 code, _, error = self.invoke(["tui", "--page-size", value])
-                self.assertEqual(1, code)
+                self.assertEqual(2, code)  # invalid_argument
                 self.assertIn("page size", error)
 
     def test_missing_textual_has_install_hint_without_account_access(self):

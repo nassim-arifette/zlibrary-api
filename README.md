@@ -62,7 +62,7 @@ Z-Library account.
    zlib-cli quota
    ```
 
-Global options such as `--domain` and `--timeout` always go before the command name.
+Global options such as `--domain`, `--timeout` and `--json` work before or after the command name.
 
 ## Find books
 
@@ -233,7 +233,7 @@ To skip typing your email, copy `credentials.example.toml` to `credentials.local
 project folder and fill it in. Leave `password` empty to be asked each time: a password written here
 is stored in plain text. Git ignores this file, and commands never print credentials or session
 cookies. `zlib-cli` finds the file there after `pip install -e .`; otherwise pass
-`--credentials PATH` before the command.
+`--credentials PATH`.
 
 ```toml
 domain = "https://z-lib.by/"
@@ -250,10 +250,19 @@ password = ""
   that nothing asks. Any list option, even `--yes`, makes `download` a list run, which needs `--yes`
   (except with `--dry-run`) and, for searched items, `--pick N`. A list run prints one line per book
   and a summary, or one report object with `--json`.
-- Exit codes: 0 success, 1 error, 2 invalid command line, 130 cancelled; `doctor` returns 1 when no
-  domain works. List runs also return 3 when books only wait (quota, `--max-downloads` or a
-  temporary failure: run the same command later) and 4 when an item needs attention (not found,
-  error, uncertain download or missing choice).
+- Nothing asks a question without a terminal: prompts need stdin and stderr to be terminals, or
+  `--interactive` to read answers from stdin. `--no-input` (or `ZLIB_NO_INPUT=1`) turns them off
+  everywhere. When an answer would be needed, the command stops before any request and says which
+  option to add. Passwords are only read from a terminal: run `zlib-cli login` there once.
+- Exit codes: 0 success, 1 failed, 2 invalid command line or missing input, 3 try again later (rate
+  limit, quota, network), 4 check before trying again (an account change or download may have
+  happened), 5 sign in first, 130 cancelled. `doctor` returns 1 when no domain works, and `jobs
+  watch` returns 0 only when the task succeeded. List runs also return 3 when books only wait
+  (quota, `--max-downloads` or a temporary failure: run the same command later) and 4 when an item
+  needs attention (not found, error, uncertain download or missing choice).
+- With `--json`, every error is one JSON object on stderr with a stable `code`, `exit_code`,
+  `retryable` and `outcome`, and JSON is always ASCII. [CLI output for scripts](docs/cli-json.md)
+  lists the shapes and codes, and how scripts written for earlier versions should adapt.
 - In PowerShell, check `$LASTEXITCODE`, and pass lists with `-a FILE` instead of piping them into
   `-a -`. Reading a list from standard input needs a saved session or an email in the credentials
   file.
@@ -329,7 +338,7 @@ progress and cancellation, reading lists, account collections and domain checks.
 | --- | --- |
 | `zlib-cli` is not found | Activate the virtual environment ([Quick start](#quick-start), step 1), or run `python -m zlib_connector` from the project folder. |
 | PowerShell refuses to run `Activate.ps1` | Run `Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned` (for that window only), then activate again. |
-| `unrecognized arguments: --domain ...` | Move global options before the command name: `zlib-cli --domain URL search ...`. |
+| `Use --yes ...`, `... needs a terminal` or `No saved session, and no terminal to sign in.` | Without a terminal nothing is asked: add the option the message names (`--yes`, `--pick N`), run `zlib-cli login` in a terminal first, or add `--interactive` to answer from standard input. |
 | A domain is blocked, stops responding or asks for browser verification | Run `doctor` again, then `zlib-cli --domain URL login` on a working domain. This client cannot complete browser verification. |
 | Login fails | Check the domain, email and password; `auth-test` tests them without touching the saved session. Repeated logins do not fix a blocked domain. |
 | `The saved session belongs to another domain` | Drop `--domain`, or run `login` on the new domain. |

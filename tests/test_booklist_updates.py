@@ -122,7 +122,7 @@ class BooklistUpdateCliTests(unittest.TestCase):
         for arguments in invalid:
             with self.subTest(arguments=arguments), patch("sys.stdin", io.StringIO()), \
                     patch("sys.stderr", io.StringIO()), patch("zlib_connector.cli.load_credentials") as load:
-                self.assertEqual(main(["booklists", *arguments]), 1)
+                self.assertEqual(main(["booklists", *arguments]), 2)
             load.assert_not_called()
 
     def test_declining_a_remove_does_not_log_in_or_change_the_list(self):
@@ -131,7 +131,7 @@ class BooklistUpdateCliTests(unittest.TestCase):
         input_stream.isatty = lambda: True
         with patch("zlib_connector.cli.Client", return_value=Client(ORIGIN, transport=transport)), \
                 patch("zlib_connector.cli.load_credentials", return_value=Credentials(ORIGIN, "synthetic", "synthetic")), \
-                patch("sys.stdin", input_stream), patch("sys.stderr", io.StringIO()) as output:
+                patch("sys.stdin", input_stream), patch("zlib_connector.cli_terminal.is_terminal", return_value=True), patch("sys.stderr", io.StringIO()) as output:
             self.assertEqual(main(["booklists", "remove", "42", "987"]), 130)
         self.assertIn("Remove entry 987 from booklist 42", output.getvalue())
         self.assertEqual(transport.calls, [])

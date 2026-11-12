@@ -2,6 +2,7 @@
 import json
 import sys
 
+from .cli_output import print_json
 from .eapi import Client
 from .search import SearchFilters
 from .books import BookReference
@@ -55,14 +56,14 @@ def show_search(client: Client, args, filters: SearchFilters):
     if args.with_pagination:
         result = client.search_page(args.query, **options)
         if args.json:
-            print(json.dumps(result.to_dict(), ensure_ascii=False))
+            print_json(result.to_dict())
         else:
             show_books(result.books)
             print(f"Page {result.page} · total: {result.total_items if result.total_items is not None else 'unknown'}")
     else:
         books = client.search(args.query, **options)
         if args.json:
-            print(json.dumps([book.to_dict() for book in books], ensure_ascii=False))
+            print_json([book.to_dict() for book in books])
         else:
             show_books(books)
 
@@ -72,7 +73,7 @@ def show_book_command(client: Client, args):
     if args.command == "info":
         book = client.get_book(args.reference)
         if args.json:
-            print(json.dumps(book.to_dict(), ensure_ascii=False))
+            print_json(book.to_dict())
         else:
             show_books([book])
             print(f"Reference: {book.book_id}:{book.book_hash}")
@@ -85,7 +86,7 @@ def show_book_command(client: Client, args):
     else:
         formats = client.get_formats(args.reference)
         if args.json:
-            print(json.dumps([item.to_dict() for item in formats], ensure_ascii=False))
+            print_json([item.to_dict() for item in formats])
         elif not formats:
             print("The server reported no alternative formats.")
         else:
@@ -110,7 +111,7 @@ def run_catalog_command(client: Client, args, filters: SearchFilters | None):
         books = client.get_recommendations()
     books = books[:args.limit]
     if args.json:
-        print(json.dumps([book.to_dict() for book in books], ensure_ascii=False))
+        print_json([book.to_dict() for book in books])
     else:
         show_books(books)
 
@@ -120,19 +121,23 @@ def run_library_command(client: Client, args):
     if args.command == "tags":
         if args.tag_action == "saved-ids":
             identifiers = client.get_saved_book_ids()
-            print(json.dumps({"book_ids": list(identifiers)}) if args.json
-                  else "\n".join(identifiers) or "No saved book IDs found.")
+            if args.json:
+                print_json({"book_ids": list(identifiers)})
+            else:
+                print("\n".join(identifiers) or "No saved book IDs found.")
         elif args.tag_action in ("add", "remove"):
             update = client.add_book_tags if args.tag_action == "add" else client.remove_book_tags
             result = update(args.reference, args.tags)
             message = f"Tags updated for book {result.book_id}."
             if result.adds_to_favorites:
                 message += " The book is also saved to favorites."
-            print(json.dumps(result.to_dict(), ensure_ascii=False) if args.json else message)
+            print_json(result.to_dict()) if args.json else print(message)
         else:
             result = client.get_library_tags()
-            print(json.dumps(result.to_dict(), ensure_ascii=False) if args.json
-                  else "\n".join(result.names) or "No My Library tags found.")
+            if args.json:
+                print_json(result.to_dict())
+            else:
+                print("\n".join(result.names) or "No My Library tags found.")
         return
 
     def show_page(page):
@@ -151,7 +156,7 @@ def run_library_command(client: Client, args):
     if args.command == "favorites" and args.favorite_action in ("add", "remove"):
         result = client.set_favorite(args.reference, saved=args.favorite_action == "add")
         if args.json:
-            print(json.dumps(result.to_dict()))
+            print_json(result.to_dict())
         else:
             state = "Added to" if result.is_favorite else "Removed from"
             print(f"{state} favorites: {result.book_id}")
@@ -164,7 +169,7 @@ def run_library_command(client: Client, args):
         else:
             result = client.remove_booklist_book(args.booklist_id, args.entry_id)
             message = f"Removed entry {result.entry_id} from booklist {result.booklist_id}."
-        print(json.dumps(result.to_dict()) if args.json else message)
+        print_json(result.to_dict()) if args.json else print(message)
         return
 
     if args.command == "booklists" and args.booklist_action in ("create", "edit", "delete"):
@@ -176,7 +181,7 @@ def run_library_command(client: Client, args):
         else:
             result = client.delete_booklist(args.booklist_id)
         if args.json:
-            print(json.dumps(result.to_dict(), ensure_ascii=False))
+            print_json(result.to_dict())
         elif action == "delete":
             print(f"Deleted booklist {result.booklist_id}.")
         else:
@@ -186,7 +191,7 @@ def run_library_command(client: Client, args):
     if args.command == "library":
         overview = client.get_library(limit=args.limit)
         if args.json:
-            print(json.dumps(overview.to_dict(), ensure_ascii=False))
+            print_json(overview.to_dict())
         else:
             for title, page in (("Favorites", overview.favorites), ("Download history", overview.history)):
                 print(title)
@@ -197,7 +202,7 @@ def run_library_command(client: Client, args):
     if args.command == "booklists" and args.booklist_action != "show":
         lists = client.get_booklists()
         if args.json:
-            print(json.dumps([item.to_dict() for item in lists], ensure_ascii=False))
+            print_json([item.to_dict() for item in lists])
         else:
             show_lists(lists)
         return
@@ -207,6 +212,6 @@ def run_library_command(client: Client, args):
         fetch = client.get_favorites if args.command == "favorites" else client.get_history
         page = fetch(page=args.page, limit=args.limit, order=args.order)
     if args.json:
-        print(json.dumps(page.to_dict(), ensure_ascii=False))
+        print_json(page.to_dict())
     else:
         show_page(page)

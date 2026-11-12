@@ -176,7 +176,7 @@ class BooklistSettingsCliTests(unittest.TestCase):
         for arguments in cases:
             with self.subTest(arguments=arguments), patch("sys.stdin", io.StringIO()), patch("sys.stderr", io.StringIO()), \
                     patch("zlib_connector.cli.load_credentials") as load:
-                self.assertEqual(main(["booklists", *arguments]), 1)
+                self.assertEqual(main(["booklists", *arguments]), 2)
             load.assert_not_called()
 
     def test_declining_each_change_prevents_login(self):
@@ -187,7 +187,7 @@ class BooklistSettingsCliTests(unittest.TestCase):
             input_stream.isatty = lambda: True
             with self.subTest(arguments=arguments), patch("zlib_connector.cli.Client", return_value=Client(ORIGIN, transport=transport)), \
                     patch("zlib_connector.cli.load_credentials", return_value=Credentials(ORIGIN, "synthetic", "synthetic")), \
-                    patch("sys.stdin", input_stream), patch("sys.stderr", io.StringIO()) as output:
+                    patch("sys.stdin", input_stream), patch("zlib_connector.cli_terminal.is_terminal", return_value=True), patch("sys.stderr", io.StringIO()) as output:
                 self.assertEqual(main(["booklists", *arguments]), 130)
             self.assertEqual(transport.calls, [])
             if arguments[0] == "create":

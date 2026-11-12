@@ -12,6 +12,7 @@ from urllib.parse import urlencode, urlsplit
 
 from .api_token import read_api_token
 from .book_files import save_book
+from .error_codes import Coded, ErrorCode
 from .errors import ConnectorError, NetworkError
 from .jobs.events import validate_event_id
 from .jobs.models import TERMINAL_STATES, validate_task_id as task_id
@@ -37,12 +38,48 @@ _STATUS_MESSAGES = {
 }
 
 
-class LocalAPIError(ConnectorError):
-    """A local API failure with a safe message, never a reflected response body."""
+ERROR_BODY_LIMIT = 64 * 1024
+_ERROR_CODE = re.compile(r"[a-z][a-z0-9_]{0,63}")
 
-    def __init__(self, status):
+
+class LocalAPIError(ConnectorError, Coded):
+    """A local API failure with a safe message, never a reflected response body.
+
+    ``code``, ``retryable`` and ``outcome`` come from the server's error object when
+    they are valid; the server's message is never kept.
+    """
+
+    def __init__(self, status, code=None, retryable=None, outcome=None):
         self.status = status
+        self.code, self.retryable, self.outcome = code, retryable, outcome
         super().__init__(_STATUS_MESSAGES.get(status, "The local API could not complete the request."))
+
+    def classification(self) -> ErrorCode:
+        return ErrorCode(self.code or "local_api_error", retryable=self.retryable is True,
+                         outcome=self.outcome or "not_applied")
+
+
+def error_details(data) -> dict:
+    """The valid code, retryable and outcome of an HTTP API error body, or nothing."""
+    if not isinstance(data, (bytes, bytearray)) or len(data) > ERROR_BODY_LIMIT:
+        return {}
+    try:
+        value = json.loads(bytes(data).decode("utf-8"), object_pairs_hook=_unique_json_object,
+                           parse_constant=_invalid_json_constant)
+    except (ValueError, UnicodeError, RecursionError):
+        return {}
+    error = value.get("error") if isinstance(value, dict) else None
+    if not isinstance(error, dict):
+        return {}
+    details = {}
+    code = error.get("code")
+    if isinstance(code, str) and _ERROR_CODE.fullmatch(code):
+        details["code"] = code
+    if type(error.get("retryable")) is bool:
+        details["retryable"] = error["retryable"]
+    if error.get("outcome") in ("not_applied", "unknown"):
+        details["outcome"] = error["outcome"]
+    return details
 
 
 def _address(value):
@@ -80,8 +117,8 @@ class LocalAPI:
             raise ValueError("Unsupported local task operation.")
 
     @staticmethod
-    def _status_error(status):
-        return LocalAPIError(status)
+    def _status_error(status, **details):
+        return LocalAPIError(status, **details)
 
     @contextmanager
     def _response(self, method, path, *, body=None, query=None, stream_duration=None, stop_at=None,
@@ -131,7 +168,7 @@ class LocalAPI:
             if cancel is not None:
                 cancel.check()
             if not 200 <= response.status < 300:
-                raise self._status_error(response.status)
+                raise self._status_error(response.status, **self._error_body(response))
             if stream_duration is not None:
                 self._event_framing(response)
                 remaining = deadline - time.monotonic()
@@ -160,6 +197,15 @@ class LocalAPI:
             if response is not None:
                 response.close()
             connection.close()
+
+    @staticmethod
+    def _error_body(response) -> dict:
+        """Read at most 64 KiB of an error body within the request deadline; never fail on it."""
+        try:
+            data = response.read(ERROR_BODY_LIMIT + 1)
+        except (AttributeError, OSError, http.client.HTTPException, ValueError):
+            return {}
+        return error_details(data)
 
     @staticmethod
     def _event_framing(response):
