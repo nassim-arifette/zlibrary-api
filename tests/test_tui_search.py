@@ -232,10 +232,12 @@ class SearchAndDiscoveryTests(TUITestCase):
         async with app.run_test() as pilot:
             await pilot.pause()
             form = app.query_one(SearchForm)
+            # The form focuses its query once mounted; wait for that before moving focus.
+            await self.until(pilot, lambda: form.query_one("#search-query", Input).has_focus)
             form.query_one("#search-query", Input).value = "history"
             form.query_one("#search-format-djvu", Checkbox).focus()
-            await pilot.pause()
-            self.assertEqual("space toggle · tab next field · ctrl+s search · esc back", text(app, "#hints"))
+            hint = "space toggle · tab next field · ctrl+s search · esc back"
+            await self.until(pilot, lambda: text(app, "#hints") == hint)
             await self.submit(app, pilot, "ctrl+s")
             self.assertEqual([("history", 1)], [call[:2] for call in self.searches(api)])
             await pilot.press("s")
@@ -252,9 +254,10 @@ class SearchAndDiscoveryTests(TUITestCase):
         async with app.run_test(size=(60, 18)) as pilot:
             await pilot.pause()
             order = app.query_one("#search-order", Select)
+            await self.until(pilot, lambda: app.query_one("#search-query", Input).has_focus)
             order.focus()
-            await pilot.pause()
-            self.assertEqual("enter choose · tab next field · ctrl+s search · esc back", text(app, "#hints"))
+            hint = "enter choose · tab next field · ctrl+s search · esc back"
+            await self.until(pilot, lambda: text(app, "#hints") == hint)
             await pilot.press("enter")
             await pilot.pause()
             self.assertTrue(order.expanded)
