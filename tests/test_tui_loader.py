@@ -108,7 +108,18 @@ class LoaderTests(unittest.TestCase):
         self.assertNotIn("secret", results[0].error)
         self.assertIn("zlib-cli serve", results[0].error)
         done.clear()
-        loader.submit(2, lambda cancel: "fresh")
+
+        def invalid(cancel):
+            from zlib_connector.catalog_schema import invalid_catalog
+            invalid_catalog()
+
+        loader.submit(2, invalid)
+        self.assertTrue(done.wait(1))
+        self.assertIn("cannot read", results[1].error)
+        self.assertNotIn("zlib-cli serve", results[1].error)
+        results.pop()
+        done.clear()
+        loader.submit(3, lambda cancel: "fresh")
         self.assertTrue(done.wait(1))
         self.assertEqual("fresh", results[1].value)
         self.assertIsNone(results[1].error)
@@ -129,7 +140,12 @@ class LoaderTests(unittest.TestCase):
         self.assertEqual([], results)
 
     def test_account_and_rate_errors_explain_explicit_recovery_without_retry(self):
-        for status, expected in ((424, "zlib-cli login"), (429, "Wait before refreshing")):
+        for status, expected in ((400, "rejected this request. Change it"), (401, "token file, then retry"),
+                                 (403, "token file, then retry"), (404, "Go back or retry"),
+                                 (424, "Run zlib-cli login if needed, then restart zlib-cli serve without --anonymous"),
+                                 (429, "Wait before retrying"),
+                                 (502, "Z-Library did not complete"), (503, "Wait, then retry"),
+                                 (504, "Z-Library did not complete"), (500, "The request failed. Retry, or go back.")):
             done = threading.Event()
             results, calls = [], []
 

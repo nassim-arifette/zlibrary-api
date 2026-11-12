@@ -1,6 +1,7 @@
 """The optional TUI launcher must not enter account login or affect core CLI."""
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
 import builtins
+import importlib.util
 import io
 import os
 from pathlib import Path
@@ -11,6 +12,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from zlib_connector.cli import main
+from zlib_connector.cli_tui import VIEWS
 
 
 @contextmanager
@@ -38,6 +40,48 @@ class TUILaunchTests(unittest.TestCase):
         with patch("builtins.__import__", side_effect=importing), self.assertRaises(SystemExit) as exited:
             self.invoke(["tui", "--help"])
         self.assertEqual(0, exited.exception.code)
+
+    def test_help_describes_every_starting_view_and_the_search_page_size(self):
+        pages = []
+        for argv in (["--help"], ["tui", "--help"]):
+            output = io.StringIO()
+            with redirect_stdout(output), redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                main(argv)
+            pages.append(" ".join(output.getvalue().split()))
+        self.assertIn("browse collections, search and discover books in an interactive terminal", pages[0])
+        self.assertIn("{" + ",".join(VIEWS) + "}", pages[1])
+        self.assertIn("home reads nothing and search opens the search form (default: home)", pages[1])
+        self.assertIn("favorites, history and search page size", pages[1])
+
+    @unittest.skipUnless(importlib.util.find_spec("textual"), "Install the optional TUI extra")
+    def test_starting_views_match_the_tui_pages(self):
+        from zlib_connector.tui.views import ROOTS, START_VIEWS
+        self.assertEqual(START_VIEWS, VIEWS)
+        self.assertEqual(("home", *ROOTS), VIEWS)
+
+    def test_every_starting_view_reaches_the_app_and_unknown_views_are_rejected(self):
+        app_factory = Mock()
+        ui_module, catalog_module = types.ModuleType("zlib_connector.tui.app"), types.ModuleType("zlib_connector.catalog_api")
+        ui_module.CollectionsApp = app_factory
+        catalog_module.CatalogAPI = Mock()
+        modules = {"zlib_connector.tui": types.ModuleType("zlib_connector.tui"),
+                   "zlib_connector.tui.app": ui_module, "zlib_connector.catalog_api": catalog_module}
+        self.assertEqual("home", VIEWS[0])
+        for view in VIEWS:
+            with self.subTest(view=view), patch.dict(sys.modules, modules), redirect_stdout(io.StringIO()), \
+                    redirect_stderr(io.StringIO()), terminal(), \
+                    patch("zlib_connector.cli.AccountSession", side_effect=AssertionError("Account access")):
+                self.assertEqual(0, main(["tui", "--token-file", "chosen-token", "--view", view]))
+                self.assertEqual(view, app_factory.call_args.kwargs["initial_view"])
+        with patch.dict(sys.modules, modules), redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()), \
+                terminal(), patch("zlib_connector.cli.AccountSession", side_effect=AssertionError("Account access")):
+            self.assertEqual(0, main(["tui", "--token-file", "chosen-token"]))
+        self.assertEqual("home", app_factory.call_args.kwargs["initial_view"])
+        for unknown in ("recently", "similar", "details"):
+            with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as exited:
+                main(["tui", "--view", unknown])
+            self.assertEqual(2, exited.exception.code)
+        self.assertEqual(len(VIEWS) + 1, app_factory.call_count)
 
     def test_noninteractive_launch_fails_before_reading_token(self):
         code, _, error = self.invoke(["tui", "--token-file", "nonexistent-token"])

@@ -1,1 +1,1 @@
-"""Optional Textual collections interface; import the app only when launching it."""
+"""Optional Textual terminal interface; import the app only when launching it."""

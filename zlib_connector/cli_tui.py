@@ -6,12 +6,17 @@ import sys
 from .local_state import state_directory
 
 
+# The TUI's starting pages, spelled out so that --help never imports Textual.
+VIEWS = ("home", "favorites", "booklists", "history", "search", "popular", "recommended")
+
+
 def add_tui_parser(commands):
-    command = commands.add_parser("tui", help="browse collections in an interactive terminal")
+    command = commands.add_parser("tui", help="browse collections, search and discover books in an interactive terminal")
     command.add_argument("--api-url", default="http://127.0.0.1:8000/v1", help="running loopback HTTP API address")
     command.add_argument("--token-file", type=Path, help="existing server token file (default: state directory/api-token)")
-    command.add_argument("--view", choices=("favorites", "booklists", "history"), default="favorites")
-    command.add_argument("--page-size", type=int, default=20, help="favorites/history page size, 1-50 (default: 20)")
+    command.add_argument("--view", choices=VIEWS, default="home",
+                         help="starting page; home reads nothing and search opens the search form (default: home)")
+    command.add_argument("--page-size", type=int, default=20, help="favorites, history and search page size, 1-50 (default: 20)")
     command.add_argument("--no-color", action="store_true", help="use monochrome output; also honors NO_COLOR")
 
 
@@ -19,7 +24,7 @@ def run_tui(args):
     if type(args.page_size) is not int or not 1 <= args.page_size <= 50:
         raise ValueError("Choose a TUI page size between 1 and 50.")
     if not sys.stdin.isatty() or not sys.stdout.isatty():
-        raise ValueError("The TUI needs an interactive terminal. Use collection commands with --json in scripts.")
+        raise ValueError("The TUI needs an interactive terminal. Use the CLI commands with --json in scripts.")
     try:
         from .tui.app import CollectionsApp
     except ModuleNotFoundError as error:
