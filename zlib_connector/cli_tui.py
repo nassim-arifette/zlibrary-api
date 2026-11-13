@@ -4,11 +4,12 @@ import os
 from pathlib import Path
 import socket
 import sys
+import tempfile
 import threading
 
 from . import cli_terminal
 from .cli_output import CommandError, InputRequired
-from .cli_settings import ensure_settings
+from .cli_settings import configured_folder, ensure_settings
 from .local_state import state_directory
 
 
@@ -47,23 +48,33 @@ def run_tui(args):
     from .catalog_api import CatalogAPI
 
     token_file = args.token_file or state_directory() / "api-token"
+    download_dir = download_folder(args)
     with _server_for(args, token_file) as url:
         try:
             api = CatalogAPI(url, token_file, timeout=args.timeout)
         except OSError:
             raise CommandError("Could not read the local API token. Start zlib-cli serve or select its existing token"
                                " file with --token-file.", code="local_api_unavailable") from None
-        _run_app(args, CollectionsApp, api)
+        _run_app(args, CollectionsApp, api, download_dir)
 
 
-def _run_app(args, CollectionsApp, api):
+def download_folder(args) -> Path:
+    """Where the TUI saves books: the download_dir setting, else the Downloads folder, else the current one."""
+    folder = configured_folder(args)
+    if folder is not None:
+        return folder
+    downloads = Path.home() / "Downloads"
+    return downloads if downloads.is_dir() else Path.cwd()
+
+
+def _run_app(args, CollectionsApp, api, download_dir):
     # Textual reads NO_COLOR when constructing App. Apply the per-launch
     # option without changing the caller's environment after construction.
     saved_no_color = os.environ.get("NO_COLOR")
     try:
         if args.no_color:
             os.environ["NO_COLOR"] = "1"
-        app = CollectionsApp(api, initial_view=args.view, page_size=args.page_size)
+        app = CollectionsApp(api, initial_view=args.view, page_size=args.page_size, download_dir=download_dir)
     finally:
         if saved_no_color is None:
             os.environ.pop("NO_COLOR", None)
@@ -109,14 +120,18 @@ def _server_for(args, token_file):
     account = AccountSession(args, credentials_loader=load_credentials)
     account.require_input(InputPolicy.from_args(args), explicit=False)
     print("Starting a private local server for this session...", file=sys.stderr, flush=True)
-    with client_factory(args, Client)(account.domain, timeout=args.timeout) as client:
-        with create_server(client, token=token, host="127.0.0.1", port=0) as server:
-            account.authenticate(client, prompt=_prompt, password_prompt=_password_prompt)
-            worker = threading.Thread(target=server.serve_forever, name="tui-local-api", daemon=True)
-            worker.start()
-            try:
-                address, port = server.server_address[:2]
-                yield f"http://{address}:{port}/v1"
-            finally:
-                server.shutdown()
-                worker.join(5)
+    # The private server's download tasks live only for this session; each finished book is copied
+    # into the download folder, then the task directory goes away with the server.
+    with tempfile.TemporaryDirectory(prefix="zlib-tui-", ignore_cleanup_errors=True) as tasks, \
+            client_factory(args, Client)(account.domain, timeout=args.timeout) as client, \
+            create_server(client, token=token, host="127.0.0.1", port=0) as server:
+        account.authenticate(client, prompt=_prompt, password_prompt=_password_prompt)
+        server.enable_downloads(Path(tasks))
+        worker = threading.Thread(target=server.serve_forever, name="tui-local-api", daemon=True)
+        worker.start()
+        try:
+            address, port = server.server_address[:2]
+            yield f"http://{address}:{port}/v1"
+        finally:
+            server.shutdown()
+            worker.join(5)

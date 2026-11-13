@@ -1,5 +1,6 @@
-"""Read-only collections, search and discovery through an existing local API server."""
+"""Collections, search, discovery and confirmed downloads through a local API server."""
 import asyncio
+import time
 from dataclasses import replace
 
 from rich.text import Text
@@ -17,6 +18,7 @@ from ..booklists import Booklist
 from ..books import BookDetails
 from ..pagination import BookPage, validate_page
 from .commands import CommandDialog, CommandsProvider
+from .downloads import DownloadDialog, DownloadRunner, DownloadTarget, DownloadUpdate
 from .home import HomePage
 from .loader import BoundedLoader, LoadResult
 from .search import SearchForm
@@ -36,12 +38,20 @@ MIN_SIZE = (40, 12)
 DETAIL_LABELS = ("Publisher", "Edition", "Pages", "Year", "Language", "ISBN-10", "ISBN-13", "Identifier",
                  "Categories", "Saved", "Reference")
 # Single-key shortcuts; the search page and the size prompt disable them.
-SHORTCUTS = {"open_root", "search", "similar", "previous_page", "next_page", "refresh", "quit_shortcut"}
+SHORTCUTS = {"open_root", "search", "similar", "previous_page", "next_page", "refresh", "quit_shortcut", "download",
+             "cancel_download"}
+QUIT_AGAIN_SECONDS = 5
 
 
 class Loaded(Message):
     def __init__(self, result: LoadResult):
         self.result = result
+        super().__init__()
+
+
+class DownloadProgress(Message):
+    def __init__(self, update: DownloadUpdate):
+        self.update = update
         super().__init__()
 
 
@@ -81,7 +91,8 @@ class CollectionsApp(App):
     .detail-value { width: 1fr; height: auto; }
     #detail-description-title { height: 1; margin-top: 1; text-style: bold; }
     #detail-description { height: auto; }
-    #hints { dock: bottom; }
+    #footer { dock: bottom; height: auto; }
+    #download-line { height: 1; padding: 0 1; text-wrap: nowrap; text-overflow: ellipsis; }
     #too-small { width: 1fr; height: 1fr; content-align: center middle; text-align: center; color: $foreground-muted; }
     Screen.-roomy #list-page, Screen.-roomy #detail-view { padding: 0 1 1 1; }
     CommandPalette > Vertical { width: 64; max-width: 100%; margin-top: 2; }
@@ -110,11 +121,13 @@ class CollectionsApp(App):
                 Binding("5", "open_root('popular')", "Popular", show=False),
                 Binding("6", "open_root('recommended')", "Recommended", show=False),
                 Binding("m", "similar", "More like this", show=False),
+                Binding("d", "download", "Download", show=False),
+                Binding("x", "cancel_download", "Cancel download", show=False),
                 Binding("left,p", "previous_page", "Previous page", show=False),
                 Binding("right,n", "next_page", "Next page", show=False),
                 Binding("r", "refresh", "Refresh", show=False)]
 
-    def __init__(self, api, *, initial_view="home", page_size=20):
+    def __init__(self, api, *, initial_view="home", page_size=20, download_dir=None):
         if initial_view not in START_VIEWS:
             raise ValueError("Choose home, favorites, booklists, history, search, popular or recommended.")
         validate_page(1, page_size)
@@ -133,6 +146,11 @@ class CollectionsApp(App):
         self._stopping = False
         self._spin = 0
         self._loader = BoundedLoader(lambda result: self.post_message(Loaded(result)))
+        # Downloads need a folder; without one, d says that they are off.
+        self.download_dir = download_dir
+        self._downloads = (None if download_dir is None else
+                           DownloadRunner(api, download_dir, lambda update: self.post_message(DownloadProgress(update))))
+        self._quit_armed = -QUIT_AGAIN_SECONDS - 1.0
 
     @property
     def view(self) -> ViewState:
@@ -186,9 +204,12 @@ class CollectionsApp(App):
                 yield Static("", id="detail-description", markup=False)
         yield Static(f"Enlarge the terminal to at least {MIN_SIZE[0]}×{MIN_SIZE[1]} · q quit", id="too-small",
                      markup=False)
-        yield HintBar(id="hints")
+        with Vertical(id="footer"):
+            yield Static("", id="download-line", markup=False)
+            yield HintBar(id="hints")
 
     def on_mount(self):
+        self.query_one("#download-line").display = False
         self._spinner = self.set_interval(.08, self._tick, pause=True)
         self._focus_form = self.view.kind == "form"
         # Opening or closing a dialog (commands, themes, help) switches the key hints to its keys and back.
@@ -198,8 +219,16 @@ class CollectionsApp(App):
     async def on_unmount(self):
         self._stopping = True
         await asyncio.to_thread(self._loader.close)
+        if self._downloads is not None:
+            await asyncio.to_thread(self._downloads.close)
 
     async def action_quit(self):
+        # Quitting stops a running download: the first press says so, a second one quits.
+        if (self._downloads is not None and self._downloads.active
+                and time.monotonic() - self._quit_armed > QUIT_AGAIN_SECONDS):
+            self._quit_armed = time.monotonic()
+            self._notice("A download is running. Press q again to stop it and quit.")
+            return
         self._stopping = True
         self._loader.cancel()
         self.exit()
@@ -251,6 +280,8 @@ class CollectionsApp(App):
     def command_available(self, name: str) -> bool:
         if name == "/similar":
             return self._similar_target() is not None
+        if name == "/download":
+            return self._downloads is not None and self._download_target() is not None
         if name == "/refresh":
             return self.view.kind not in ("home", "form")
         return True
@@ -583,6 +614,8 @@ class CollectionsApp(App):
         # The help lists its keys under its text; this line would repeat them, half hidden by the box.
         if self.too_small or isinstance(dialog, HelpScreen):
             return []
+        if isinstance(dialog, DownloadDialog):
+            return [("enter", "select", 0), ("←→", "choose", 1), ("esc", "cancel", 0)]
         if isinstance(dialog, CommandPalette):
             return [("↑↓", "choose", 0), ("enter", "apply" if dialog.id == THEME_PALETTE else "run", 0), ("esc", "close", 0)]
         if state.kind == "home":
@@ -602,7 +635,7 @@ class CollectionsApp(App):
         if state.kind == "details":
             # As in the help, ↑↓ appears only while the page is taller than the terminal.
             scroll = ("↑↓", "scroll", 2) if self.query_one("#detail-view").max_scroll_y > 0 else None
-            return [scroll, ("m", "more like this", 0), ("r", "refresh", 1), back, commands]
+            return [scroll, self._download_hint(), ("m", "more like this", 0), ("r", "refresh", 1), back, commands]
         if state.kind == "booklists":
             if not state.rows:
                 return [("r", "refresh", 0), back, commands]
@@ -610,8 +643,14 @@ class CollectionsApp(App):
         page = state.value if isinstance(state.value, BookPage) else None
         paging = ("←→", "page", 1) if page is not None and (page.next_page or page.previous_page) else None
         if state.rows:
-            return [("↑↓", "select", 2), paging, ("enter", "details", 0), ("m", "more like this", 1), edit, back, commands]
+            return [("↑↓", "select", 2), paging, ("enter", "details", 0), self._download_hint(), ("m", "more like this", 1),
+                    edit, back, commands]
         return [paging, edit, ("r", "refresh", 1), back, commands]
+
+    def _download_hint(self):
+        if self._downloads is None:
+            return None
+        return ("x", "cancel download", 1) if self._downloads.active else ("d", "download", 1)
 
     def on_resize(self):
         # This handler runs before Textual records the new size; render after it.
@@ -685,18 +724,60 @@ class CollectionsApp(App):
             return
         self._navigate(lambda: stack.append(child))
 
-    def _similar_target(self) -> tuple[str, str] | None:
-        """The reference and title of the book that m would use, if any."""
+    def _selected_book(self):
+        """The reference and the book that m and d would use, if any."""
         state = self.view
         if self._loading or state.error is not None or state.value is None:
             return None
         if state.kind == "details":
-            return (state.identifier, state.value.title) if isinstance(state.value, BookDetails) else None
+            return (state.identifier, state.value) if isinstance(state.value, BookDetails) else None
         rows, index = state.books, self.query_one(BookTable).cursor_row
         if state.kind not in BOOK_KINDS or not 0 <= index < len(rows):
             return None
         reference = book_reference(rows[index])
-        return None if reference is None else (reference, rows[index].title)
+        return None if reference is None else (reference, rows[index])
+
+    def _similar_target(self) -> tuple[str, str] | None:
+        """The reference and title of the book that m would use, if any."""
+        selected = self._selected_book()
+        return None if selected is None else (selected[0], selected[1].title)
+
+    def _download_target(self) -> DownloadTarget | None:
+        selected = self._selected_book()
+        if selected is None:
+            return None
+        reference, book = selected
+        return DownloadTarget(reference, book.title, getattr(book, "extension", "") or "",
+                              getattr(book, "size", "") or "")
+
+    def action_download(self):
+        target = self._download_target()
+        if target is None:
+            return
+        if self._downloads is None:
+            self._notice("✗ Downloads are not available in this session.")
+            return
+        if self._downloads.active:
+            self._notice("✗ A download is already running. Press x to cancel it.")
+            return
+
+        def confirmed(answer):
+            if answer and not self._stopping and not self._downloads.active:
+                self._downloads.start(target)
+        self.push_screen(DownloadDialog(target, self.download_dir), confirmed)
+
+    def action_cancel_download(self):
+        if self._downloads is not None and self._downloads.active:
+            self._downloads.cancel()
+            self._notice("Cancelling the download…")
+
+    def on_download_progress(self, message: DownloadProgress):
+        if not self._live:
+            return
+        line = self.query_one("#download-line", Static)
+        line.update(Content.styled(message.update.text, message.update.style))
+        line.display = True
+        self._show_hints()
 
     def action_similar(self):
         target = self._similar_target()

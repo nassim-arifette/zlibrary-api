@@ -182,9 +182,11 @@ HELP_SECTIONS = (
                 ("esc", "Back, or Home from a first page"), ("q or ctrl+c", "Quit"))),
     ("Book lists", (("↑ ↓ or j k", "Select a book"), ("pgup pgdn", "Move by a screen"),
                     ("home end", "First or last book"), ("← → or p n", "Previous or next page"),
-                    ("enter", "Book details; open a booklist"), ("m", "More like this"),
+                    ("enter", "Book details; open a booklist"), ("d", "Download the book"),
+                    ("x", "Cancel the running download"), ("m", "More like this"),
                     ("r", "Refresh, or retry after an error"))),
-    ("Book details", (("↑ ↓ pgup pgdn", "Scroll"), ("m", "More like this"), ("r", "Refresh"))),
+    ("Book details", (("↑ ↓ pgup pgdn", "Scroll"), ("d", "Download the book"), ("m", "More like this"),
+                      ("r", "Refresh"))),
     ("Search form", (("tab shift+tab", "Next or previous field (also ↑ ↓)"), ("enter", "Search; on Sort by, open the list"),
                      ("space", "Toggle a format"), ("ctrl+s", "Search from any field"),
                      ("esc", "Back without searching"))),
@@ -193,6 +195,8 @@ HELP_TIPS = ("On the search form, letter and digit keys never switch pages or qu
              "Z-Library applies the search filters; with no format checked, PDF, EPUB and DjVu are included.",
              "Download history and recommendations come from your account; recommendations need a "
              "signed-in server.",
+             "A download asks first, then saves into your download_dir setting, else your Downloads folder."
+             " Quitting stops a running download.",
              "Changing pages stops waiting for obsolete reads. A request the server already accepted may still finish.")
 
 

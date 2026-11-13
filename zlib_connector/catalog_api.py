@@ -89,6 +89,30 @@ class CatalogAPI:
 
     def __init__(self, url, token_file, *, timeout=30):
         self._http = _CatalogHTTP(url, token_file, timeout=timeout)
+        self._tasks_client = None
+        self._address, self._token_file, self._timeout = url, token_file, timeout
+
+    @property
+    def _tasks(self) -> LocalAPI:
+        """The download task client, created on first use with the same address and token file."""
+        if self._tasks_client is None:
+            self._tasks_client = LocalAPI(self._address, self._token_file, timeout=self._timeout)
+        return self._tasks_client
+
+    def submit_download(self, reference, *, key) -> dict:
+        """Submit one book as a download task; the key makes a repeated submission return the same task."""
+        _reference(reference)
+        return self._tasks.request("POST", "/downloads", body={"reference": reference, "idempotency_key": key})
+
+    def download_task(self, identifier) -> dict:
+        return self._tasks.request("GET", f"/downloads/{identifier}")
+
+    def cancel_download(self, identifier) -> dict:
+        return self._tasks.request("POST", f"/downloads/{identifier}/cancel")
+
+    def save_download(self, identifier, folder, *, title):
+        """Copy a completed task's file into folder; returns the published path."""
+        return self._tasks.file(identifier, folder, title=title)
 
     def favorites(self, *, page=1, limit=20, cancel: CancellationToken | None = None) -> BookPage:
         return self._page("/favorites", page=page, limit=limit, cancel=cancel)

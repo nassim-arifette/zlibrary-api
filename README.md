@@ -190,8 +190,8 @@ zlib-cli tags add ID:HASH "To read" "Science"
 ## Browse in the terminal
 
 An optional terminal interface lets you search the catalog with filters, see popular, recommended
-and similar books, and browse your favorites, booklists and download history. It only reads: it
-does not change your account or start downloads. One command is enough:
+and similar books, browse your favorites, booklists and download history, and download a book with
+`d`. It does not change your account. One command is enough:
 
 ```sh
 python -m pip install -e ".[tui]"
@@ -201,6 +201,11 @@ zlib-cli tui
 The interface uses your saved session (run `zlib-cli login` once, or it asks for your email and
 password). If a `zlib-cli serve` is already running, it uses that server; otherwise it starts a
 private one for the session and stops it when you quit.
+
+`d` on a book asks for confirmation, then downloads it into your `download_dir` setting (else your
+Downloads folder) and shows the progress at the bottom; `x` cancels. Each confirmation is one
+download from your daily allowance, and a failed download is never retried on its own. With your
+own `zlib-cli serve`, start it with `--downloads` (or `--download-dir DIR`) to download from the TUI.
 
 ![The terminal interface showing a favorites list, with the selected book's details above it](docs/images/tui.png)
 
