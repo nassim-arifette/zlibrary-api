@@ -25,10 +25,11 @@ from .cli_session import AccountSession, local_session_command, session_message
 from .cli_table import print_table
 from .cli_examples import DEPRECATED
 from .cli_output import CommandError, InputRequired, UsageError, prepare_streams, print_json, report_error, wants_json
-from .cli_terminal import InputPolicy, ask, choose, confirm, is_terminal, password
+from .cli_terminal import InputPolicy, ask, choose, is_terminal, password
 from .cli_parser import (BOOKLIST_MUTATIONS, CATALOG_COMMANDS, DISCOVERY_COMMANDS, LIBRARY_COMMANDS, command_names,
                          finish, parser)
-from .cli_views import account_confirmation, booklist_options, run_catalog_command, run_library_command, show_books
+from .cli_changes import prepare as prepare_change, run_change
+from .cli_views import booklist_options, run_catalog_command, run_library_command, show_books
 
 
 def prompt(label: str) -> str:
@@ -175,7 +176,8 @@ def _run(argv, operation) -> int:
         if args.json:
             print_json(status)
         else:
-            print(session_message(status))
+            print("Local session forgotten. The server session is not revoked." if args.command == "logout"
+                  else session_message(status))
         return 0
     if args.command == "serve":
         run_server(args, client_factory=Client, credentials_loader=load_credentials, prompt=ask_line,
@@ -230,14 +232,20 @@ def _run(argv, operation) -> int:
     booklist_change = args.command == "booklists" and args.booklist_action in BOOKLIST_MUTATIONS
     tag_change = args.command == "tags" and args.tag_action in ("add", "remove")
     account_change = favorite_change or booklist_change or tag_change
-    if account_change and not args.yes and not policy.allowed:
+    if account_change:
+        prepare_change(args)
+    listed = account_change and args.change_items is not None
+    if listed and not args.yes and not args.dry_run:
+        raise InputRequired("A list of account changes needs --yes. Use --dry-run to see it first.",
+                            name="ValueError")
+    if account_change and not args.yes and not args.dry_run and not policy.allowed:
         raise InputRequired("Use --yes to apply an account update in non-interactive mode.", name="ValueError")
-    if favorite_change:
+    if favorite_change and not listed:
         reference = args.reference
-        if args.page != 1 or args.limit != 20 or args.order != "saved_date":
-            raise ValueError("List pagination and ordering cannot be used with a favorite update.")
+    if favorite_change and (args.page != 1 or args.limit != 20 or args.order != "saved_date"):
+        raise ValueError("List pagination and ordering cannot be used with a favorite update.")
     if tag_change:
-        reference = args.reference
+        reference = None if listed else args.reference
         validate_tags(args.tags, for_removal=args.tag_action == "remove")
     if args.command in ("favorites", "history", "library"):
         validate_page(getattr(args, "page", 1), args.limit)
@@ -245,7 +253,7 @@ def _run(argv, operation) -> int:
         booklist_id(args.booklist_id)
         if args.booklist_action == "show":
             validate_page(args.page, 20)
-        elif args.booklist_action == "add":
+        elif args.booklist_action == "add" and not listed:
             reference = args.reference
         elif args.booklist_action == "remove":
             booklist_entry_id(args.entry_id)
@@ -284,10 +292,11 @@ def _run(argv, operation) -> int:
     with Client(account.domain, timeout=args.timeout) as client:
         if reference is not None:
             BookReference.parse(reference, client.domain)
-        if account_change and not args.yes:
-            confirm(account_confirmation(args, client.domain), policy=policy, read=prompt)
+        saved = account.snapshot.session if account.snapshot is not None else None
         account.authenticate(client, prompt=ask_line, password_prompt=ask_password)
         if args.command == "login":
+            if saved is not None and saved.origin != client.domain:
+                notice(args, f"Note: this replaced the session saved for {saved.origin}.")
             if args.json:
                 print_json({"authenticated": True, "stored": True, "domain": client.domain})
             else:
@@ -318,7 +327,7 @@ def _run(argv, operation) -> int:
             return 0
         if args.command in LIBRARY_COMMANDS:
             if account_change:
-                operation.kind = "account_change"  # Only the mutating Client call runs from here.
+                return run_change(client, args, policy=policy, read=prompt, operation=operation)
             run_library_command(client, args)
             return 0
         if reference is not None:

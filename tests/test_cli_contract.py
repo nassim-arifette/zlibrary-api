@@ -244,14 +244,16 @@ class AccountChangeErrorTests(ContractTestCase):
         for answer, message in (("n", "Cancelled. Nothing was changed."), (EOFError(), "Cancelled. Nothing was changed."),
                                 (KeyboardInterrupt(), "Cancelled.")):
             with self.subTest(answer=answer):
-                client = FakeClient()
+                client = FakeClient({"get_book": FormatChangedError("synthetic")})  # The title stays unknown.
                 value = self.error_object(["favorites", "add", "123:ab12", "--json", "--no-session"], client,
                                           terminal=True, answers=[answer])
                 self.assertEqual(("Cancelled", message, "cancelled", 130, "not_applied"),
                                  (value["error"], value["message"], value["code"], value["exit_code"],
                                   value["outcome"]))
-                self.assertEqual([], client.calls)
-        code, out, err = self.run_cli(["favorites", "add", "123:ab12", "--no-session"], terminal=True, answers=["no"])
+                self.assertEqual(["login", "get_book"], client.calls)
+        code, out, err = self.run_cli(["favorites", "add", "123:ab12", "--no-session"],
+                                      FakeClient({"get_book": FormatChangedError("synthetic")}), terminal=True,
+                                      answers=["no"])
         self.assertEqual((130, "", "Cancelled. Nothing was changed.\n"), (code, out, err))
 
 

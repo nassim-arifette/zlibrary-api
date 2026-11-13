@@ -125,16 +125,22 @@ class BooklistUpdateCliTests(unittest.TestCase):
                 self.assertEqual(main(["booklists", *arguments]), 2)
             load.assert_not_called()
 
-    def test_declining_a_remove_does_not_log_in_or_change_the_list(self):
-        transport = QueueTransport([])
-        input_stream = io.StringIO("n\n")
-        input_stream.isatty = lambda: True
-        with patch("zlib_connector.cli.Client", return_value=Client(ORIGIN, transport=transport)), \
-                patch("zlib_connector.cli.load_credentials", return_value=Credentials(ORIGIN, "synthetic", "synthetic")), \
-                patch("sys.stdin", input_stream), patch("zlib_connector.cli_terminal.is_terminal", return_value=True), patch("sys.stderr", io.StringIO()) as output:
-            self.assertEqual(main(["booklists", "remove", "42", "987"]), 130)
-        self.assertIn("Remove entry 987 from booklist 42", output.getvalue())
-        self.assertEqual(transport.calls, [])
+    def test_declining_a_remove_names_the_entry_and_list_without_changing_it(self):
+        lists = {"success": 1, "list": [{"id": 42, "title": "To read", "books_count": 12}]}
+        for entries, expected in (([ENTRY], 'entry 987 ("Example", book 123)'),
+                                  ([{**ENTRY, "readlist_books_id": 5}], "entry 987 (book not identified)")):
+            transport = transport_for(lists, {"success": 1, "books": entries})
+            input_stream = io.StringIO("n\n")
+            input_stream.isatty = lambda: True
+            with self.subTest(expected=expected), \
+                    patch("zlib_connector.cli.Client", return_value=Client(ORIGIN, transport=transport)), \
+                    patch("zlib_connector.cli.load_credentials", return_value=Credentials(ORIGIN, "synthetic", "synthetic")), \
+                    patch("sys.stdin", input_stream), patch("zlib_connector.cli_terminal.is_terminal", return_value=True), \
+                    patch("sys.stderr", io.StringIO()) as output:
+                self.assertEqual(main(["booklists", "remove", "42", "987"]), 130)
+            self.assertIn(f'Remove {expected} from booklist 42 "To read" (12 books) on {ORIGIN}? [y/N]', output.getvalue())
+            self.assertEqual(transport.responses, [])
+            self.assertFalse(any("remove-book" in url for url, _, _ in transport.calls))
 
     def test_show_displays_the_entry_id_needed_for_removal(self):
         transport = transport_for({"success": 1, "books": [ENTRY]})

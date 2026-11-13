@@ -1,7 +1,8 @@
 # zlib-cli: complete CLI implementation spec
 
 Design, 2026-11-11. Status on 2026-11-13: D1 to D3 implemented (see `docs/cli-json.md` and the Settings section of
-`docs/reference.md`); D4 to D7 not implemented yet. The owner decided the open questions on 2026-11-12 (section 10).
+`docs/reference.md`) and D4 (see "Account changes in the CLI" in `docs/reference.md`); D5 to D7 not
+implemented yet. The owner decided the open questions on 2026-11-12 (section 10).
 
 - **Request:** the owner's "cli complet" item: a coherent command set, JSON for every command (errors
   included), documented exit codes, a strict non-interactive mode, lists on standard input, messages kept
@@ -1054,24 +1055,24 @@ text above:
 
 ### D4. Clear account changes, dry runs and lists
 
-- [ ] **Described confirmations.** The prompt names the action, the book title (read once when needed), the
+- [x] **Described confirmations.** The prompt names the action, the book title (read once when needed), the
   booklist title and its book count, and the domain. A deletion also says `This cannot be undone.`:
   `Permanently delete booklist 98765 "To read" (12 books) on https://z-lib.by/? This cannot be undone. [y/N]`.
   - For `booklists remove`, the entry's book is looked up in the list's first pages. If it is not found,
     the prompt says `entry 4242 (book not identified)`.
-- [ ] **`--dry-run`.** All 9 mutating actions accept `--dry-run`.
+- [x] **`--dry-run`.** All 9 mutating actions accept `--dry-run`.
   - It validates the change and resolves it, with reads allowed.
   - It prints the change that would be sent: `{"dry_run": true, "action": "favorite_add", "domain": ...,
     "book_id": ..., "title": ...}`.
   - It never prompts, sends no change and exits 0.
-- [ ] **Lists of references.**
+- [x] **Lists of references.**
   - `favorites add -` and `favorites remove -`, `booklists add BOOKLIST_ID -`, and `tags add - TAG...` and
     `tags remove - TAG...` read a list from stdin. `-a FILE` reads the same list from a file.
   - Both reuse `batch_input.parse_input`.
   - Only exact references are accepted: `ID:HASH`, a book URL, or objects with `book_id` and `book_hash`.
     The JSON output of `search`, `favorites` and `booklists show` therefore works as input.
   - A title is refused with a pointer to `download -a LIST --dry-run --json`.
-- [ ] **List changes.**
+- [x] **List changes.**
   - A list change requires `--yes`.
   - It first prints a stderr summary such as `Add 12 books to favorites on https://z-lib.by/`.
   - It returns `{"items": [{"position", "reference", "status", "code"}], "summary": {"applied", "failed",
@@ -1079,8 +1080,11 @@ text above:
   - Exit 0 when every item was applied, 4 when any item failed or is uncertain, and 3 when a rate limit
     stopped the run (the remaining items are `not_started`).
   - No item is ever retried.
-- [ ] **Login notice.** `login` prints a notice when it replaces a session saved for another domain.
+- [x] **Login notice.** `login` prints a notice when it replaces a session saved for another domain.
   `logout` keeps saying that it does not revoke the server session.
+- Implementation notes (2026-11-13): the description needs reads, so a described prompt now comes after
+  sign-in; `--yes` skips those reads. A sign-in or verification failure also stops a list. `--dry-run` with
+  `--yes` is refused.
 
 ### D5. `queue`, `recent` and `serve --json`
 

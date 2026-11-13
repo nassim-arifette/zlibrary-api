@@ -61,6 +61,10 @@ class Client:
         self.calls.append(("download", book.book_id))
         return folder
 
+    def get_book(self, reference):
+        self.calls.append(("get_book", reference))
+        return Mock(title="Example")
+
     def set_favorite(self, reference, saved):
         self.calls.append(("set_favorite", reference))
         return Mock(to_dict=lambda: {"book_id": "123", "is_favorite": saved}, is_favorite=saved, book_id="123")

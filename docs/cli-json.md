@@ -131,6 +131,12 @@ When the outcome is `unknown`, the hint names the read that shows the current st
 `Check with: zlib-cli booklists show BOOKLIST_ID` (add and remove) or `Check with: zlib-cli booklists`
 (create, edit and delete). Nothing retries automatically.
 
+A list change (`favorites add -`, `tags add -a FILE TAG`, ...) reports every item instead:
+`{"items": [{"position", "reference", "status", "code"}], "summary": {"applied", "failed", "uncertain",
+"not_started"}}` on stdout, with exit 0 (all applied), 4 (any failed or uncertain), 3 (a rate limit stopped
+the run) or 130. `--dry-run` prints `{"dry_run": true, "action", "domain", ...}` and exits 0. Details:
+"Account changes in the CLI" in `docs/reference.md`.
+
 ### Single-book download
 
 A download uses quota once its link request is sent. Errors of `download` with one book carry

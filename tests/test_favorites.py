@@ -131,15 +131,18 @@ class FavoriteCliTests(unittest.TestCase):
                 self.assertEqual(main(["favorites", action, "123:ab12", "--yes", "--json"]), 0)
             self.assertEqual(json.loads(output.getvalue()), {"book_id": "123", "is_favorite": state})
 
-    def test_declining_a_change_does_not_contact_the_server(self):
-        transport = QueueTransport([])
+    def test_declining_a_change_only_reads_the_book_to_name_it(self):
+        transport = QueueTransport([{"response": {}}, {"success": 1, "user": {}}, {"success": 1, "book": BOOK}])
         input_stream = io.StringIO("n\n")
         input_stream.isatty = lambda: True
         with patch("zlib_connector.cli.Client", return_value=Client(ORIGIN, transport=transport)), \
                 patch("zlib_connector.cli.load_credentials", return_value=Credentials(ORIGIN, "synthetic", "synthetic")), \
-                patch("sys.stdin", input_stream), patch("zlib_connector.cli_terminal.is_terminal", return_value=True), patch("sys.stderr", io.StringIO()):
+                patch("sys.stdin", input_stream), patch("zlib_connector.cli_terminal.is_terminal", return_value=True), \
+                patch("sys.stderr", io.StringIO()) as errors:
             self.assertEqual(main(["favorites", "remove", "123:ab12"]), 130)
-        self.assertEqual(transport.calls, [])
+        self.assertIn(f'Remove "Example" (book 123) from favorites on {ORIGIN}? [y/N]', errors.getvalue())
+        self.assertEqual(transport.calls[-1][0], ORIGIN + "eapi/book/123/ab12")
+        self.assertEqual(transport.responses, [])
 
 
 if __name__ == "__main__":

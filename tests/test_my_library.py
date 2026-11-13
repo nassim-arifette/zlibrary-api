@@ -182,9 +182,10 @@ class MyLibraryCliTests(unittest.TestCase):
             load.assert_not_called()
             constructor.assert_not_called()
 
-    def test_declining_update_happens_before_login_and_add_confirmation_mentions_favorites(self):
+    def test_declining_update_sends_no_change_and_add_confirmation_mentions_favorites(self):
         for action in ("add", "remove"):
-            transport = QueueTransport([])
+            transport = QueueTransport([{"response": {}}, {"success": 1, "user": {}},
+                                        {"success": 1, "book": {"id": 123, "hash": "ab12", "title": "Example"}}])
             input_stream = io.StringIO("n\n")
             input_stream.isatty = lambda: True
             output = io.StringIO()
@@ -192,7 +193,8 @@ class MyLibraryCliTests(unittest.TestCase):
                     patch("zlib_connector.cli.load_credentials", return_value=Credentials(ORIGIN, "synthetic", "synthetic")), \
                     patch("sys.stdin", input_stream), patch("zlib_connector.cli_terminal.is_terminal", return_value=True), patch("sys.stderr", output):
                 self.assertEqual(main(["tags", action, "123:ab12", "Science"]), 130)
-            self.assertEqual(transport.calls, [])
+            self.assertEqual(transport.responses, [])
+            self.assertFalse(any("tags" in url for url, _, _ in transport.calls))
             if action == "add":
                 self.assertIn("favorite", output.getvalue().lower())
 

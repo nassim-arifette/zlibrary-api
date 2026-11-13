@@ -831,7 +831,8 @@ in verification output.
 It requires login and returns `FavoriteUpdate(book_id, is_favorite)` after the
 server reports success. The CLI exposes `favorites add` and `favorites remove`,
 with an interactive confirmation or explicit `--yes` for scripts. Invalid input
-and declined confirmations do not send an account update.
+and declined confirmations do not send an account update. See "Account changes
+in the CLI" below for the prompt, `--dry-run` and lists of references.
 
 Although the upstream save/unsave endpoints use GET, the client treats them as
 mutations: it does not follow redirects or retry them. A network failure or
@@ -860,8 +861,8 @@ not interpreted as counts or colors. An empty upstream `[]` catalog is valid.
 `BookTagUpdate.to_dict()` contains `book_id`, `action`, `tags`, and
 `adds_to_favorites`. It acknowledges the submitted change after server success;
 it is not a snapshot of all tags on the book. Unreadable mutation responses raise
-`MutationUncertainError`, with no redirect or automatic retry. The CLI confirms
-before login, or requires `--yes` in scripts. Adding tags explicitly mentions
+`MutationUncertainError`, with no redirect or automatic retry. The CLI asks for
+confirmation, or requires `--yes` in scripts. Adding tags explicitly mentions
 its effect on favorites.
 
 The site's [bookmark script](https://z-lib.by/resources/js/user-bookmarks.js)
@@ -928,6 +929,51 @@ an incomplete or conflicting result raises `MutationUncertainError`. Deletion
 returns `BooklistDeletion`, serialized as `{booklist_id, deleted: true}` after
 the service confirms success. All three CLI commands require confirmation or
 `--yes`, and support `--json`. Deleting a list does not delete downloaded files.
+
+### Account changes in the CLI
+
+The nine changes (`favorites add/remove`, `tags add/remove`, `booklists
+add/remove/create/edit/delete`) are validated before credentials load. In a
+terminal, the CLI signs in, reads what it needs to describe the change, then
+asks; nothing is changed before the answer:
+
+    Permanently delete booklist 98765 "To read" (12 books) on https://z-lib.by/? This cannot be undone. [y/N]
+
+The reads are the book (for its title), the account's booklists (for the list
+title and book count) and, for `booklists remove`, the first 3 pages of the
+list to identify the entry's book (`entry 4242 (book not identified)` when it is
+not there). A failed read leaves that detail out. With `--yes` there is no
+question, so none of these reads happen.
+
+`--dry-run` does the same reads, prints the change that would be sent and
+exits 0 without asking or changing anything; `--json` prints it as an object
+such as `{"dry_run": true, "action": "favorite_add", "domain": ..., "book_id":
+..., "title": ...}`. It cannot be combined with `--yes`.
+
+`favorites add -`, `favorites remove -`, `booklists add BOOKLIST_ID -`,
+`tags add - TAG...` and `tags remove - TAG...` read a list of references from
+stdin; `-a FILE` reads one from a file. The list uses the `download -a` parser
+(TXT, CSV or JSON) but accepts only exact references: `ID:HASH`, a book URL, or
+objects with `book_id` and `book_hash`, so the `--json` output of `search`,
+`favorites` and `booklists show` works as input. A title is refused; find its
+reference with `download -a LIST --dry-run --json`.
+
+A list change needs `--yes` (or `--dry-run`), prints a summary such as
+`Add 12 books to favorites on https://z-lib.by/.` on stderr, then sends each
+change once, in input order, never retrying. Its result lists every item:
+
+    {"items": [{"position": 1, "reference": "123:ab12", "status": "applied", "code": null}],
+     "summary": {"applied": 1, "failed": 0, "uncertain": 0, "not_started": 0}}
+
+`status` is `applied`, `failed`, `uncertain` (the change may have been applied;
+`code` is `mutation_uncertain` or `cancelled`) or `not_started`. A rate limit
+stops the run: that item and the rest are `not_started`. A sign-in or
+verification failure also stops it. The exit code is 0 when every item was
+applied, 4 when any failed or is uncertain, 3 when a rate limit stopped an
+otherwise clean run, and 130 after Ctrl+C.
+
+`login` notes when it replaces a session saved for another domain. `logout`
+forgets the local session and says that the server session is not revoked.
 
 The site's current [booklist component](https://z-lib.by/components/z-booklist.js),
 [list browser](https://z-lib.by/components/z-booklists-browser.js) and

@@ -203,6 +203,18 @@ class CliSessionTests(unittest.TestCase):
         self.assertNotEqual(self.store().read().generation, previous.generation)
         loader.assert_called_once_with(None)
 
+    def test_login_notes_that_it_replaced_a_session_saved_for_another_domain(self):
+        now = int(time.time())
+        other = SavedSession("https://other.example/", (SessionCookie("remix_userid", "1", expires=now + 3600),
+                                                       SessionCookie("remix_userkey", "other", expires=now + 3600)),
+                             saved_at=now)
+        self.store().save(other, expected_generation=None)
+        code, _, errors, _, _, _ = self.run_cli(["--domain", ORIGIN, "login"],
+                                                replies=[login_reply(), profile_reply()], credentials=True)
+        self.assertEqual(code, 0)
+        self.assertEqual(errors, "Note: this replaced the session saved for https://other.example/.\n")
+        self.assertEqual(self.store().read().session.origin, ORIGIN)
+
     def test_no_session_and_auth_test_bypass_all_session_reads_and_writes(self):
         for args, replies in (
             (["--no-session", "history", "--json"], [login_reply(), profile_reply(), Reply(data=b'{"success":1,"books":[]}')]),
@@ -236,16 +248,19 @@ class CliSessionTests(unittest.TestCase):
                 self.assertEqual(json.loads(errors)["error"], "ValueError")
         self.assertFalse(self._isolated_session_state.exists())
 
-    def test_declined_account_mutation_does_not_even_verify_a_saved_session(self):
+    def test_declined_account_mutation_only_restores_and_reads_and_keeps_the_saved_session(self):
         snapshot = self.saved()
         input_stream = io.StringIO()
         input_stream.isatty = lambda: True
-        code, output, _, _, _, prompt = self.run_cli(
-            ["favorites", "remove", "123:ab12"], input_stream=input_stream)
+        book = Reply(data=b'{"success":1,"book":{"id":123,"hash":"ab12","title":"Example"}}')
+        code, output, _, connections, _, prompt = self.run_cli(
+            ["favorites", "remove", "123:ab12"], replies=[profile_reply(), book], input_stream=input_stream)
         self.assertEqual(code, 130)
         self.assertEqual(output, "")
         prompt.assert_called_once()
-        self.assertEqual(self.store().read(), snapshot)
+        self.assertEqual([connection.calls[0][1] for connection in connections],
+                         ["/eapi/user/profile", "/eapi/book/123/ab12"])
+        self.assertEqual(self.store().read().session, snapshot.session)
 
 
 if __name__ == "__main__":

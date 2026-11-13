@@ -141,6 +141,17 @@ def finish(args):
     return args
 
 
+def _change_options(command, *, lists=False) -> None:
+    """--yes and --dry-run for the nine account changes; -a FILE where a list of references is accepted."""
+    if lists:
+        command.add_argument("-a", "--batch-file", metavar="FILE",
+                             help="read references from a TXT, CSV or JSON file, such as the --json output of"
+                                  " search, favorites or booklists show; a list change needs --yes")
+    command.add_argument("--yes", action="store_true", help="apply the account change without prompting")
+    command.add_argument("--dry-run", action="store_true",
+                         help="describe the change without sending it; reads are allowed, nothing is asked")
+
+
 def parser() -> argparse.ArgumentParser:
     result = CLIParser(prog="zlib-cli", description="Z-Library CLI for search, downloads and personal collections.",
                        epilog=exit_codes_text(), formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -199,18 +210,18 @@ def parser() -> argparse.ArgumentParser:
         if name == "favorites":
             actions = command.add_subparsers(dest="favorite_action")
             for action in ("add", "remove"):
-                change = actions.add_parser(action, help=f"{action} a book in your account favorites")
-                change.add_argument("reference", help="ID:HASH or a book URL on the selected domain")
-                change.add_argument("--yes", action="store_true", help="apply the account change without prompting")
+                change = actions.add_parser(action, help=f"{action} books in your account favorites")
+                change.add_argument("reference", nargs="?", help="ID:HASH, a book URL, or - to read a list of references from standard input")
+                _change_options(change, lists=True)
     tags = commands.add_parser("tags", help="native My Library tags and saved book IDs")
     tags.set_defaults(tag_action="list")
     tag_actions = tags.add_subparsers(dest="tag_action")
     for action in ("list", "saved-ids", "add", "remove"):
         command = tag_actions.add_parser(action)
         if action in ("add", "remove"):
-            command.add_argument("reference", help="ID:HASH or a book URL on the selected domain")
+            command.add_argument("reference", nargs="?", help="ID:HASH, a book URL, or - to read a list of references from standard input")
             command.add_argument("tags", nargs="+", help="exact tag labels; quote labels containing spaces")
-            command.add_argument("--yes", action="store_true", help="apply the account change without prompting")
+            _change_options(command, lists=True)
     library = commands.add_parser("library", help="overview of favorites, download history and booklists")
     library.add_argument("--limit", type=int, default=5, help="preview size per book collection")
     booklists = commands.add_parser("booklists", help="browse the booklists on your account")
@@ -224,10 +235,10 @@ def parser() -> argparse.ArgumentParser:
         change = actions.add_parser(action, help=f"{action} a book in an existing booklist")
         change.add_argument("booklist_id", help="booklist ID from booklists list")
         if action == "add":
-            change.add_argument("reference", help="ID:HASH or a book URL on the selected domain")
+            change.add_argument("reference", nargs="?", help="ID:HASH, a book URL, or - to read a list of references from standard input")
         else:
             change.add_argument("entry_id", help="entry ID from booklists show, distinct from the book ID")
-        change.add_argument("--yes", action="store_true", help="apply the account change without prompting")
+        _change_options(change, lists=action == "add")
     for action in ("create", "edit", "delete"):
         change = actions.add_parser(action, help=f"{action} a remote booklist")
         if action == "create":
@@ -245,7 +256,7 @@ def parser() -> argparse.ArgumentParser:
             visibility.add_argument("--public", dest="is_public", action="store_true", help="make the list public")
             visibility.add_argument("--private", dest="is_public", action="store_false", help="make the list private (default for new lists)")
             change.set_defaults(is_public=False if action == "create" else None)
-        change.add_argument("--yes", action="store_true", help="apply the account change without prompting")
+        _change_options(change)
     commands.add_parser("auth-test", help="test login using local credentials, then discard the session")
     commands.add_parser("shell", help="interactive session: log in once, search and download repeatedly")
     commands.add_parser("check", help="check public HTTPS access without credentials")

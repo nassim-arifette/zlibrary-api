@@ -179,23 +179,24 @@ class BooklistSettingsCliTests(unittest.TestCase):
                 self.assertEqual(main(["booklists", *arguments]), 2)
             load.assert_not_called()
 
-    def test_declining_each_change_prevents_login(self):
-        cases = (["create", "New", "--public"], ["edit", "42", "--description", "A\nB"], ["delete", "42"])
-        for arguments in cases:
-            transport = QueueTransport([])
+    def test_declining_each_change_sends_nothing(self):
+        lists = {"success": 1, "list": [{"id": 42, "title": "To read", "books_count": 12}]}
+        cases = ((["create", "New", "--public"], [], f'Create booklist "New" on {ORIGIN} (public, color 0'),
+                 (["edit", "42", "--description", "A\nB"], [lists],
+                  f'Edit booklist 42 "To read" (12 books) on {ORIGIN}: description "A B"? [y/N]'),
+                 (["delete", "42"], [lists],
+                  f'Permanently delete booklist 42 "To read" (12 books) on {ORIGIN}? This cannot be undone. [y/N]'))
+        for arguments, reads, expected in cases:
+            transport = QueueTransport([{"response": {}}, {"success": 1, "user": {}}, *reads])
             input_stream = io.StringIO("n\n")
             input_stream.isatty = lambda: True
             with self.subTest(arguments=arguments), patch("zlib_connector.cli.Client", return_value=Client(ORIGIN, transport=transport)), \
                     patch("zlib_connector.cli.load_credentials", return_value=Credentials(ORIGIN, "synthetic", "synthetic")), \
                     patch("sys.stdin", input_stream), patch("zlib_connector.cli_terminal.is_terminal", return_value=True), patch("sys.stderr", io.StringIO()) as output:
                 self.assertEqual(main(["booklists", *arguments]), 130)
-            self.assertEqual(transport.calls, [])
-            if arguments[0] == "create":
-                self.assertIn('"is_public": true', output.getvalue())
-            elif arguments[0] == "edit":
-                self.assertIn('"description": "A\\nB"', output.getvalue())
-            else:
-                self.assertIn("Permanently delete booklist 42", output.getvalue())
+            self.assertEqual(transport.responses, [])
+            self.assertEqual(len(transport.calls), 2 + len(reads))
+            self.assertIn(expected, output.getvalue())
 
 
 class JsonRequestTests(unittest.TestCase):

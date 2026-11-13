@@ -174,14 +174,17 @@ zlib-cli tags add ID:HASH "To read" "Science"
 - `library` previews your favorites, download history and booklists; `favorites` and `history` list
   them page by page. `history` is Z-Library's record of your downloads, not a list of files on this
   computer. Books in your favorites are marked `[saved]` when that is known.
-- `favorites add` and `favorites remove` take a reference.
+- `favorites add` and `favorites remove` take a reference, or `-` (stdin) or `-a FILE` for a list of
+  references: the `--json` output of `search`, `favorites` or `booklists show` works. `booklists add`
+  and `tags add/remove` take lists the same way. Lists need `--yes` and report each book's status.
 - `booklists` shows each list with its ID first. `ENTRY_ID` is the `Booklist entry` number that
   `booklists show` prints under each book; it is not the book ID. New lists are private unless you
   pass `--public`, `edit` changes only what you pass, and `booklists delete` is permanent.
 - `tags` lists your My Library tags. `tags add` also adds the book to your favorites, and
   `tags remove` keeps it there. Labels are case-sensitive: quote labels with spaces, and copy
   existing ones from `tags`.
-- Every change shows what it will do and asks `[y/N]`; scripts pass `--yes`. Changes are never
+- Every change shows what it will do (book title, booklist title and size, domain) and asks `[y/N]`;
+  scripts pass `--yes`, and `--dry-run` shows the change without sending it. Changes are never
   retried automatically: if a connection problem leaves one unconfirmed, check before retrying.
 
 ## Browse in the terminal

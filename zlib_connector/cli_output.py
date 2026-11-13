@@ -159,7 +159,7 @@ def _name_and_message(error):
     return "InternalError", _INTERNAL_MESSAGE
 
 
-def _mutation_hint(args):
+def mutation_hint(args):
     command = getattr(args, "command", None)
     if command == "favorites":
         return "Check with: zlib-cli favorites"
@@ -191,7 +191,7 @@ def describe(error, *, operation="read", args=None, command=None) -> dict:
             if isinstance(getattr(error, name), str):
                 value[name] = getattr(error, name)
     if operation == "account_change" and result.outcome == "unknown":
-        hint = _mutation_hint(args)
+        hint = mutation_hint(args)
     elif result.quota_may_be_used:
         hint = QUOTA_HINT
     elif hint is None and code == "invalid_argument":
