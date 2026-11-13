@@ -191,7 +191,7 @@ class JobsContractTests(unittest.TestCase):
             (401, {"code": "unauthorized", "retryable": False, "outcome": "not_applied"}, "unauthorized", 1,
              "Use the token file of the running server (--token-file)."),
             (503, {"code": "downloads_unavailable", "retryable": False, "outcome": "not_applied"},
-             "downloads_unavailable", 1, "Start the server with --download-dir DIR."),
+             "downloads_unavailable", 1, "Start the server without --no-downloads or --anonymous."),
             (503, {"code": "downloads_busy", "retryable": True, "outcome": "not_applied"}, "downloads_busy", 3, None),
             (404, {"code": "download_not_found", "retryable": False, "outcome": "not_applied"}, "download_not_found",
              1, None),
@@ -225,8 +225,8 @@ class JobsContractTests(unittest.TestCase):
                   " download."),
                  (["cancel", IDENTIFIER], "unknown", 4, f"Check with: zlib-cli jobs show {IDENTIFIER}"),
                  (["resume"], "unknown", 4, "Check with: zlib-cli jobs list"),
-                 (["list"], "not_applied", 1, "Start the server: zlib-cli serve --download-dir DIR"),
-                 (["show", IDENTIFIER], "not_applied", 1, "Start the server: zlib-cli serve --download-dir DIR")]
+                 (["list"], "not_applied", 1, "Start the server: zlib-cli serve"),
+                 (["show", IDENTIFIER], "not_applied", 1, "Start the server: zlib-cli serve")]
         api = unittest.mock.Mock()
         api.request.side_effect = NetworkError("Could not contact the local API.")
         for arguments, outcome, exit_code, hint in cases:

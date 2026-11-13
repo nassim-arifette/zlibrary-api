@@ -100,8 +100,8 @@ def progress_text(task: dict, title: str) -> str:
 def failure_text(error: Exception) -> str:
     status, code = getattr(error, "status", None), getattr(error, "code", None)
     if code == "downloads_unavailable":
-        return ("✗ Downloads are off on this server. Start zlib-cli serve --downloads, or stop it and let"
-                " zlib-cli tui start its own.")
+        return ("✗ Downloads are off on this server. Restart zlib-cli serve without --no-downloads, or stop it"
+                " and let zlib-cli tui start its own.")
     if status == 503:
         return "✗ The server cannot take a download now. Try again later."
     if status == 400:

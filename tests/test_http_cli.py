@@ -66,6 +66,11 @@ class FakeServer:
     def __init__(self, events, *, serve_error=None):
         self.events = events
         self.serve_error = serve_error
+        self.task_folder = None
+
+    def enable_downloads(self, directory, *, max_tasks):
+        # Tasks are on by default; the lifecycle tests record them only where they check them.
+        self.task_folder = directory
 
     def __enter__(self):
         self.events.append("server_enter")
@@ -110,6 +115,43 @@ class HttpCliTests(unittest.TestCase):
                         self.assertTrue(failure)
                 expected = ["client_enter", "server_enter", "login", "enable_downloads"]
                 self.assertEqual(expected + ([] if failure else ["serve"]) + ["server_close", "client_close"], events)
+
+    def test_downloads_are_on_by_default_and_off_when_asked_or_anonymous(self):
+        from zlib_connector.http_cli import default_task_folder
+        cases = ((("serve",), default_task_folder()), (("serve", "--no-downloads"), None),
+                 (("serve", "--anonymous"), None))
+        for argv, expected in cases:
+            with self.subTest(argv=argv):
+                events, output = [], io.StringIO()
+                server = FakeServer(events)
+                with redirect_stderr(output):
+                    run_server(options(*argv), client_factory=lambda *a, **k: FakeClient(events),
+                               credentials_loader=lambda path: Credentials(email="synthetic", password="synthetic"),
+                               server_factory=lambda *a, **k: server)
+                self.assertEqual(expected, server.task_folder)
+                self.assertIn("Downloads: on" if expected else "Downloads: off", output.getvalue())
+        self.assertTrue(default_task_folder().is_dir())
+
+    def test_a_busy_default_task_folder_turns_downloads_off_but_a_chosen_one_fails(self):
+        from zlib_connector.jobs.models import JobBusyError
+        with tempfile.TemporaryDirectory() as folder:
+            for argv, fails in ((("serve",), False), (("serve", "--download-dir", folder), True)):
+                with self.subTest(argv=argv):
+                    events, output = [], io.StringIO()
+                    server = FakeServer(events)
+                    server.enable_downloads = Mock(side_effect=JobBusyError("Synthetic owner"))
+                    run = lambda: run_server(options(*argv), client_factory=lambda *a, **k: FakeClient(events),
+                                             credentials_loader=lambda path: Credentials(email="s", password="s"),
+                                             server_factory=lambda *a, **k: server)
+                    with redirect_stderr(output):
+                        if fails:
+                            with self.assertRaises(JobBusyError):
+                                run()
+                        else:
+                            run()
+                    if not fails:
+                        self.assertIn("Downloads: off (another server uses the task folder)", output.getvalue())
+                        self.assertIn("serve", events)
 
     def test_bad_task_configuration_does_not_create_token_or_read_account(self):
         with tempfile.TemporaryDirectory() as folder:

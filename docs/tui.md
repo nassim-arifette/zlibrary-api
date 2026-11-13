@@ -184,8 +184,8 @@ is a new, explicit download.
 
 Quitting stops a running download: the first `q` warns you, a second one
 within five seconds quits. With the private server, unfinished downloads end
-with the session. A running `zlib-cli serve` must have downloads enabled
-(`--downloads` or `--download-dir DIR`); otherwise the TUI says so.
+with the session. A running `zlib-cli serve` has downloads on unless it was
+started with `--no-downloads` or `--anonymous`; then the TUI says so.
 
 ## Search
 

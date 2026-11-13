@@ -117,8 +117,8 @@ interactive CLI confirmation. New booklists are private unless `is_public` is
 true. Tag additions report `adds_to_favorites: true`. Edits have the upstream
 concurrency limitations described in the [reference](reference.md).
 
-Download routes require `serve --download-dir PATH` and an authenticated account.
-They return 503 while disabled, and `/capabilities` reports that configuration.
+Download routes are on for an authenticated `serve` unless it was started with
+`--no-downloads`; an `--anonymous` server has none. They return 503 while disabled, and `/capabilities` reports that configuration.
 The [task guide](download-tasks.md) covers idempotency, quota waits, cancellation,
 restart behavior and file retrieval. Task reads and cancellation remain available
 while the worker holds the upstream client lock.
