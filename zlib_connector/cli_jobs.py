@@ -7,7 +7,8 @@ import time
 
 from .cli_output import CommandError, print_json
 from .cli_table import print_table
-from .cli_settings import default_output, ensure_settings
+from .cli_settings import default_output, ensure_settings, notice
+from .error_codes import classify
 from .errors import NetworkError
 from .jobs.events import validate_event_id
 from .local_api import LocalAPI, task_id
@@ -15,11 +16,33 @@ from .local_state import state_directory
 from .jobs.models import TERMINAL_STATES, validate_idempotency_key, validate_task_page
 
 
-def add_jobs_parser(commands):
-    command = commands.add_parser("jobs", help="manage downloads on a running local API server")
+def _server_options(command):
     command.add_argument("--api-url", help="loopback HTTP API address (default: the api_url setting, else"
                          " http://127.0.0.1:8000/v1)")
     command.add_argument("--token-file", type=Path, help="existing server token file (default: state directory/api-token)")
+
+
+def add_queue_parser(commands):
+    command = commands.add_parser("queue", help="queue several downloads on a running local API server")
+    _server_options(command)
+    actions = command.add_subparsers(dest="queue_action", required=True)
+    add = actions.add_parser("add")
+    add.add_argument("references", nargs="*", metavar="ID:HASH",
+                     help="exact references or book URLs, or - to read a list from standard input")
+    add.add_argument("-a", "--batch-file", metavar="FILE",
+                     help="read references from a TXT, CSV or JSON file, such as the --json output of search,"
+                          " favorites or booklists show")
+    add.add_argument("--key", required=True, metavar="PREFIX",
+                     help="request key prefix: item N is sent as PREFIX-000N; reuse it only to replay the same list")
+    listing = actions.add_parser("list")
+    listing.add_argument("--limit", type=int, default=50, help="maximum tasks shown (default: 50)")
+    listing.add_argument("--offset", type=int, default=0, help="tasks to skip, newest first (default: 0)")
+    actions.add_parser("resume")
+
+
+def add_jobs_parser(commands):
+    command = commands.add_parser("jobs", help="manage downloads on a running local API server")
+    _server_options(command)
     actions = command.add_subparsers(dest="job_action", required=True)
     for name in ("add", "list", "show", "cancel", "resume", "file", "watch"):
         action = actions.add_parser(name)
@@ -46,6 +69,73 @@ _UNAVAILABLE = {
     "resume": ("unknown", "Check with: zlib-cli jobs list"),
 }
 _READ_HINT = "Start the server: zlib-cli serve --download-dir DIR"
+
+
+_QUEUE_STOPS = ("unauthorized", "forbidden", "downloads_unavailable", "local_api_unavailable")
+_REPLAY = "Run the same command again: the server replays each key and never adds a second download."
+
+
+def run_queue(args) -> int:
+    """queue list and resume are jobs list and resume; queue add submits one task per reference."""
+    if args.queue_action != "add":
+        args.job_action = args.queue_action
+        return run_jobs(args)
+    ensure_settings(args)
+    from .cli_changes import read_references
+    if args.batch_file is not None and args.references:
+        raise ValueError("Give references, - for standard input, or -a FILE, not several.")
+    if args.batch_file is not None:
+        references = read_references(args.batch_file)
+    elif args.references == ["-"]:
+        references = read_references("-")
+    elif not args.references or "-" in args.references:
+        raise ValueError("Give references, - to read a list from standard input, or -a FILE.")
+    else:
+        references = read_references(data="\n".join(args.references).encode("utf-8"))
+    width = max(4, len(str(len(references))))
+    keys = [validate_idempotency_key(f"{args.key}-{number:0{width}d}") for number in range(1, len(references) + 1)]
+    api = LocalAPI(args.api_url, args.token_file or state_directory() / "api-token", timeout=args.timeout)
+    notice(args, f"Queue {len(references)} download(s) on the local API.")
+    items = [{"position": number, "reference": reference, "key": key, "task_id": None, "state": "not_started",
+              "code": None} for number, (reference, key) in enumerate(zip(references, keys), 1)]
+    cancelled = paused = False
+    for item in items:
+        try:
+            task = api.request("POST", "/downloads", body={"reference": item["reference"],
+                                                           "idempotency_key": item["key"]})
+        except KeyboardInterrupt:
+            item.update(state="uncertain", code="cancelled")
+            cancelled = True
+            break
+        except Exception as error:  # Every item gets a state; nothing is retried.
+            result = classify(error, mutation=True)
+            code = "local_api_unavailable" if isinstance(error, NetworkError) else result.code
+            if result.retryable and result.outcome != "unknown":
+                item["code"], paused = code, True
+                break
+            item.update(state="uncertain" if result.outcome == "unknown" else "failed", code=code)
+            if code in _QUEUE_STOPS:
+                break
+        else:
+            item.update(task_id=task.get("id"), state=task.get("state"))
+    counts = {name: sum(item["state"] == name for item in items) for name in ("failed", "uncertain", "not_started")}
+    counts = {"submitted": len(items) - sum(counts.values()), **counts}
+    if args.json:
+        print_json({"items": items, "summary": counts})
+    else:
+        print_table(("#", "REFERENCE", "KEY", "TASK_ID", "STATE"),
+                    [(item["position"], item["reference"], item["key"], item["task_id"],
+                      item["state"].replace("_", " ") + (f" ({item['code']})" if item["code"] else ""))
+                     for item in items], right=(0,))
+        print(f"Submitted {counts['submitted']}, failed {counts['failed']}, uncertain {counts['uncertain']},"
+              f" not started {counts['not_started']}.")
+    if counts["uncertain"] or counts["not_started"]:
+        notice(args, _REPLAY)
+    if cancelled:
+        return 130
+    if counts["failed"] or counts["uncertain"]:
+        return 4
+    return 3 if paused else 0
 
 
 def run_jobs(args) -> int:

@@ -13,7 +13,7 @@ from .api_token import load_api_token
 from .local_state import state_directory
 from .cli_session import AccountSession
 from .cli_terminal import InputPolicy
-from .cli_output import UsageError
+from .cli_output import UsageError, print_json
 from .cli_settings import configured_folder, ensure_settings
 from .local_api import _address
 
@@ -140,7 +140,11 @@ def run_server(args, *, client_factory=Client, credentials_loader=load_credentia
             if getattr(args, "download_dir", None) is not None:
                 server.enable_downloads(args.download_dir, max_tasks=args.max_download_tasks)
             address, port = server.server_address[:2]
-            print(f"HTTP API: http://{address}:{port}/v1", file=sys.stderr, flush=True)
-            print(f"Bearer token file: {token_path}", file=sys.stderr, flush=True)
-            print("Press Ctrl+C to stop.", file=sys.stderr, flush=True)
+            if getattr(args, "json", False):
+                print_json({"event": "listening", "url": f"http://{address}:{port}/v1", "token_file": str(token_path),
+                            "downloads": getattr(args, "download_dir", None) is not None})
+            else:
+                print(f"HTTP API: http://{address}:{port}/v1", file=sys.stderr, flush=True)
+                print(f"Bearer token file: {token_path}", file=sys.stderr, flush=True)
+                print("Press Ctrl+C to stop.", file=sys.stderr, flush=True)
             server.serve_forever()

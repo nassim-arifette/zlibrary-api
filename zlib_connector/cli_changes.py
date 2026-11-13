@@ -40,8 +40,11 @@ def change_action(args) -> str | None:
     return ACTIONS.get((args.command, getattr(args, sub, None))) if sub else None
 
 
-def _read_list(source) -> tuple[str, ...]:
-    if source == "-":
+def read_references(source=None, *, data: bytes | None = None) -> tuple[str, ...]:
+    """Exact ID:HASH references from stdin (-), a file, or given bytes; a title or an empty list is refused."""
+    if data is not None:
+        items, _ = parse_input(data)
+    elif source == "-":
         stream = getattr(sys.stdin, "buffer", None)
         data = stream.read(MAX_INPUT_BYTES + 1) if stream is not None else sys.stdin.read(MAX_INPUT_BYTES + 1)
         items, _ = parse_input(data)
@@ -78,7 +81,7 @@ def prepare(args) -> None:
     if args.reference == "-":
         source = "-"
     if source is not None:
-        args.change_items = _read_list(source)
+        args.change_items = read_references(source)
 
 
 def _short(text) -> str | None:

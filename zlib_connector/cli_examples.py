@@ -4,7 +4,7 @@ A test parses every example with ``cli_parser.parser()``, so the examples stay v
 """
 
 GROUPS = (
-    ("Find", ("search", "info", "formats", "similar", "recommended", "popular", "recent")),
+    ("Find", ("search", "info", "formats", "similar", "recommended", "popular")),
     ("Download", ("download", "queue", "jobs")),
     ("Library", ("library", "favorites", "history", "booklists", "tags")),
     ("Account", ("login", "logout", "status", "profile", "quota")),
@@ -37,6 +37,10 @@ COMMANDS = {
                  "Download an exact reference, a search result chosen with a prompt or --pick, or a list with -a.",
                  ("download 1234567:a1b2c3 --output books", 'download "dune" --format epub --pick 1',
                   "download -a reading-list.txt --dry-run", "download -a reading-list.csv --yes --json")),
+    "queue": ("queue several downloads on a running local server",
+              "Submit a list of exact references to zlib-cli serve --downloads, one task per book, keys PREFIX-0001...",
+              ("queue add 1234567:a1b2c3 7654321:d4e5f6 --key reading", "queue add -a books.json --key reading --json",
+               "queue list", "queue resume")),
     "jobs": ("manage downloads on a running local server",
              "Submit, follow and collect download tasks of zlib-cli serve --downloads.",
              ("jobs add 1234567:a1b2c3 --key reading-0001", "jobs list", "jobs watch 0123456789abcdef0123456789abcdef")),
@@ -76,7 +80,7 @@ COMMANDS = {
                ("config list --show-origin", "config set domain https://z-lib.by/", "config set formats epub pdf",
                 "config unset timeout")),
     "serve": ("serve the local HTTP API", "Serve the authenticated local HTTP API on a loopback address.",
-              ("serve", "serve --port 8080 --downloads", "serve --anonymous")),
+              ("serve", "serve --port 8080 --downloads", "serve --port 0 --downloads --json", "serve --anonymous")),
     "tui": ("interactive terminal interface", "Browse collections, search and discover books in a terminal UI.",
             ("tui", "tui --view search", "tui --api-url http://127.0.0.1:8000/v1")),
     "shell": ("interactive search and download loop", "Log in once, then search and download repeatedly.",

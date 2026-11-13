@@ -1,7 +1,7 @@
 # zlib-cli: complete CLI implementation spec
 
 Design, 2026-11-11. Status on 2026-11-13: D1 to D3 implemented (see `docs/cli-json.md` and the Settings section of
-`docs/reference.md`) and D4 (see "Account changes in the CLI" in `docs/reference.md`); D5 to D7 not
+`docs/reference.md`), D4 (see "Account changes in the CLI" in `docs/reference.md`) and D5; D6 and D7 not
 implemented yet. The owner decided the open questions on 2026-11-12 (section 10).
 
 - **Request:** the owner's "cli complet" item: a coherent command set, JSON for every command (errors
@@ -1088,7 +1088,7 @@ text above:
 
 ### D5. `queue`, `recent` and `serve --json`
 
-- [ ] **`queue add`** takes `REF...`, `-` or `-a FILE`, with `--key PREFIX`.
+- [x] **`queue add`** takes `REF...`, `-` or `-a FILE`, with `--key PREFIX`.
   - It sends one `POST /v1/downloads` per item, with keys `PREFIX-0001`, `PREFIX-0002`, and so on. The
     derived keys must pass `validate_idempotency_key`: 8 to 128 characters from letters, digits, `.`,
     `_`, `~` and `-`.
@@ -1096,18 +1096,23 @@ text above:
   - It returns `{"items": [{"position", "reference", "key", "task_id", "state", "code"}], "summary"}`.
   - Running the same command again replays the same submissions, because the server persists each key
     before it acknowledges the request. Exit codes follow D4.
-- [ ] **`queue list` and `queue resume`** are the same calls as `jobs list` and `jobs resume`, with the same
+- [x] **`queue list` and `queue resume`** are the same calls as `jobs list` and `jobs resume`, with the same
   JSON. `jobs add`, `jobs list` and `jobs resume` keep working. `queue watch` waits for a global event
   route.
-- [ ] **`recent [--limit N]`** is built on a recorded fixture of `/eapi/book/recently` that holds a book
+- [x] ~~**`recent [--limit N]`**~~ dropped is built on a recorded fixture of `/eapi/book/recently` that holds a book
   list.
   - If the endpoint returns no list, the command fails with `upstream_unavailable` (exit 1). It never
     prints an empty list, which would read as "nothing new".
   - Its help points to `search QUERY --order date`.
   - This depends on open question 6.
-- [ ] **`serve --json`** prints one NDJSON line on stdout once the server listens:
+- [x] **`serve --json`** prints one NDJSON line on stdout once the server listens:
   `{"event": "listening", "url": "http://127.0.0.1:PORT/v1", "token_file": "...", "downloads": true}`. It
   never prints the token.
+- Implementation notes (2026-11-13): `/eapi/book/recently` still returned only `{"success":1}` (anonymous read on
+  `https://z-lib.by/`), so `recent` is dropped and the docs point to `search QUERY --order date`. `queue add`
+  reports `state` (the task state, or `failed`, `uncertain`, `not_started`) and `summary.submitted`; a busy
+  server, a lost connection, a rejected token or disabled downloads stop the run. `queue watch` waits for a
+  global event route on the server.
 
 ### D6. Shell completion (standard library only)
 
@@ -1232,7 +1237,7 @@ deliverables; only the decision is recorded here.
 | 3 | Put `config.toml` in `%APPDATA%` (roaming), not `%LOCALAPPDATA%` beside the session? | **Yes, `%APPDATA%`.** Settings are preferences; the session and tokens stay local. A roamed `download_dir` that is missing on another PC fails with a clear message | Accepted. Done in D2: `%APPDATA%\zlibrary-api\config.toml`, and a missing configured folder gives `config_invalid` naming its source |
 | 4 | Should a configured `domain` win over the saved session's domain, failing on a mismatch like `--domain` does today? | **Yes**, with the warning at `config set domain` and a mismatch message that names the source. Otherwise the setting would silently do nothing while a session exists | Accepted. Done in D2: the mismatch message names `--domain`, `ZLIB_DOMAIN`, `the config file (domain)` or `the credentials file (domain)`, and `config set domain` warns |
 | 5 | Print a one-line notice when the legacy `credentials.local.toml` beside the package is used? | **Yes**, once per run. Keep the legacy path supported with no removal date: a plain-text password in site-packages deserves the nudge | Accepted. Done in D2: once per run on stderr, also in JSON mode; the legacy path stays supported |
-| 6 | `recent`: on 2026-11-09, `/eapi/book/recently` returned only a success marker. Check it again before D5? | **Yes.** Make one read-only check on a domain you choose. If it still returns no list, drop `recent` from D5 and document `search QUERY --order date` | Accepted, before D5 |
+| 6 | `recent`: on 2026-11-09, `/eapi/book/recently` returned only a success marker. Check it again before D5? | **Yes.** Make one read-only check on a domain you choose. If it still returns no list, drop `recent` from D5 and document `search QUERY --order date` | Done 2026-11-13: still no list, `recent` dropped |
 | 7 | Ship D1 as one PR (output contract and input policy)? | **Yes**. They share the codes and the terminal test. Section 4.12 describes a fallback split | Accepted. D1 ships as one PR |
 | 8 | Hide and deprecate `check` and `auth-test` in D3? | **Yes.** Their behavior and JSON stay. Remove them no earlier than one release after the notice | Accepted, for D3 |
 | 9 | Add a per-run way to clear configured filters, such as `--format any`? | **Not in D2.** `--no-config` and explicit flags cover it. Revisit after real use | Accepted. Not in D2: `--no-config` and explicit `--format` or `--language` replace configured filters |

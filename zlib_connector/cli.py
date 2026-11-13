@@ -15,7 +15,7 @@ from .pagination import validate_page
 from .my_library import validate_tags
 from .http_cli import run_server
 from .mcp_cli import run_mcp
-from .cli_jobs import run_jobs
+from .cli_jobs import run_jobs, run_queue
 from .cli_tui import run_tui
 from .cli_progress import ProgressDisplay, Ticker
 from .cli_batch import is_batch, run_batch_command
@@ -171,6 +171,8 @@ def _run(argv, operation) -> int:
         return 0
     if args.command == "jobs":
         return run_jobs(args)
+    if args.command == "queue":
+        return run_queue(args)
     if args.command in ("status", "logout"):
         status = local_session_command(args, client_factory=Client)
         if args.json:

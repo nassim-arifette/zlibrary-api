@@ -1009,7 +1009,9 @@ not an upstream pagination or language-filter request.
 These methods were checked in read-only calls on 2026-11-09. Public similar and
 popular responses contain sparse records; personalized recommendations also
 returned a books list. `/eapi/book/recently` returned a success marker without a
-books list on that domain, so no recent-additions command is exposed yet.
+books list on that domain, and again on 2026-11-13 (anonymous read on
+`https://z-lib.by/`: `{"success":1}`), so no recent-additions command is exposed.
+Use `search QUERY --order date` for recently added books.
 
 ## Protocol and safeguards
 

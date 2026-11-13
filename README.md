@@ -337,13 +337,17 @@ zlib-cli jobs add ID:HASH --key dune-epub-001
 zlib-cli jobs list
 zlib-cli jobs watch 0123456789abcdef0123456789abcdef
 zlib-cli jobs file 0123456789abcdef0123456789abcdef --output books
+zlib-cli queue add -a reading-list.json --key reading
 ```
 
 The server downloads queued books one at a time. `--key` is required and names the request: sending
 the same key and book again returns the same task instead of a second download. `jobs add` and
 `jobs list` print each task's 32-character ID, which `show`, `watch`, `cancel` and `file` take (the
 ID above is an example). `jobs file` copies a finished book without downloading it again. When the
-quota runs out, the queue pauses until you run `zlib-cli jobs resume`. Stopping the server
+quota runs out, the queue pauses until you run `zlib-cli jobs resume`. `queue add` submits a list of
+exact references (arguments, `-` for stdin or `-a FILE`, such as the `--json` output of `search`) as one
+task per book, with keys `PREFIX-0001`, `PREFIX-0002`...; running it again replays the same tasks. For
+scripts, `serve --json` prints one line with the URL and token file once it listens. Stopping the server
 interrupts the current download, which is not retried. See the
 [download task guide](docs/download-tasks.md).
 
@@ -412,7 +416,7 @@ Version 0.1.0: everything described above works today. Planned, without dates:
 
 Not supported: formats other than PDF, EPUB and DjVu, files over 256 MiB, browser verification, HTTP
 API connections from other machines, paging or filters for `popular`, `similar` and `recommended`, a
-recent-additions view, and deleting download tasks or importing a booklist into the queue.
+recent-additions view (Z-Library's endpoint returns no list; use `search QUERY --order date`), and deleting download tasks or importing a booklist into the queue.
 
 ## Documentation
 

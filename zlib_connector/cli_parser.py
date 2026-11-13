@@ -15,7 +15,7 @@ from .search import SEARCH_ORDERS
 from .http_cli import add_serve_parser
 from .mcp_cli import add_mcp_parser
 from .cli_session import add_session_options
-from .cli_jobs import add_jobs_parser
+from .cli_jobs import add_jobs_parser, add_queue_parser
 from .cli_tui import add_tui_parser
 from .cli_batch import add_batch_options
 from .cli_output import UsageError, exit_codes_text
@@ -161,6 +161,7 @@ def parser() -> argparse.ArgumentParser:
     commands = result.add_subparsers(dest="command", required=True, metavar="COMMAND",
                                      help="run zlib-cli COMMAND --help for its options and examples")
     add_session_options(result, commands)
+    add_queue_parser(commands)
     add_jobs_parser(commands)
     add_tui_parser(commands)
     for name in ("search", "download"):

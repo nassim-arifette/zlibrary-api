@@ -137,6 +137,12 @@ A list change (`favorites add -`, `tags add -a FILE TAG`, ...) reports every ite
 the run) or 130. `--dry-run` prints `{"dry_run": true, "action", "domain", ...}` and exits 0. Details:
 "Account changes in the CLI" in `docs/reference.md`.
 
+`queue add` works the same way on the local API: `state` is the task's state when the server accepted the
+item, else `failed`, `uncertain` (the request may have reached the server; `code` is
+`local_api_unavailable` or `cancelled`) or `not_started`. A busy or rate-limited server stops the run (exit 3
+if nothing else went wrong), as does a lost connection, a rejected token or disabled downloads. Each item is
+sent once; running the same command again with the same `--key` replays the tasks already created.
+
 ### Single-book download
 
 A download uses quota once its link request is sent. Errors of `download` with one book carry
@@ -254,8 +260,10 @@ usual one-line startup refusal (exit 1).
 | `domains` | An array of strings |
 | `check` / `auth-test` (always JSON) | `{reachable, domain, api, search_ok, results, authenticated}` / `{"authenticated": true}` |
 | `jobs add`, `show`, `cancel` / `list` / `resume` / `file` / `watch` | A task `{id, reference, state, created_at, updated_at, progress, cancel_requested, error_code, file_available, error_message, outcome}` / `{tasks, total, limit, offset, paused}` / the server's resume object (`resumed` count) / `{"path": ...}` / NDJSON events `{id, task, paused}` |
+| `queue add` / `list` / `resume` | `{items: [{position, reference, key, task_id, state, code}], summary: {submitted, failed, uncertain, not_started}}` / as `jobs` |
 | `config path`, `list`, `get`, `set`, `unset` | See [Settings](#settings) |
-| `serve`, `shell`, `tui`, `mcp` | No data on stdout (`mcp` speaks JSON-RPC there) |
+| `serve --json` | One NDJSON line once it listens: `{"event": "listening", "url": "http://127.0.0.1:PORT/v1", "token_file": ..., "downloads": false}`. The token is never printed |
+| `serve` (text), `shell`, `tui`, `mcp` | No data on stdout (`mcp` speaks JSON-RPC there) |
 
 ## Migration from earlier versions
 
