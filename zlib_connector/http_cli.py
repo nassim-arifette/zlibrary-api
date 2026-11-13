@@ -10,6 +10,7 @@ from .eapi import Client
 from .http_api import create_server
 from .http_api.server import _allowed_origin
 from .api_token import load_api_token
+from .jobs.models import JobBusyError
 from .local_state import state_directory
 from .cli_session import AccountSession
 from .cli_terminal import InputPolicy
@@ -43,9 +44,11 @@ def add_serve_parser(commands):
     command.add_argument("--anonymous", action="store_true", help="serve without loading or sending account credentials")
     folders = command.add_mutually_exclusive_group()
     folders.add_argument("--download-dir", type=Path,
-                         help="enable durable download tasks in this existing directory")
+                         help="keep download tasks in this existing directory (default: state directory/downloads)")
     folders.add_argument("--downloads", action="store_true",
-                         help="enable durable download tasks in the download_dir setting's folder")
+                         help="keep download tasks in the download_dir setting's folder")
+    folders.add_argument("--no-downloads", action="store_true",
+                         help="turn download tasks off; they are on by default for a signed-in server")
     command.add_argument("--max-download-tasks", type=int, default=1000,
                          help="maximum retained tasks per account (1-10000; default: 1000)")
     return command
@@ -102,8 +105,24 @@ def _listen_address(args, settings):
     args.port = int(args.port) if port_default else args.port
 
 
+def default_task_folder() -> Path:
+    """Where a signed-in server keeps its download tasks when no folder is chosen."""
+    return state_directory() / "downloads"
+
+
+def _task_folder(args):
+    """The task directory to enable, or None: off with --no-downloads or --anonymous."""
+    if getattr(args, "download_dir", None) is not None:
+        return args.download_dir
+    if getattr(args, "no_downloads", False) or args.anonymous:
+        return None
+    folder = default_task_folder()
+    folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+    return folder
+
+
 def _download_folder(args):
-    """--downloads takes the configured folder; a configured folder never enables tasks on its own."""
+    """--downloads takes the configured folder; without it, the configured folder is never the task directory."""
     if not getattr(args, "downloads", False):
         return
     if getattr(args, "download_dir", None) is not None:
@@ -137,14 +156,24 @@ def run_server(args, *, client_factory=Client, credentials_loader=load_credentia
         with server_factory(client, token=token, host=args.host, port=args.port,
                             allowed_origins=args.allow_origin) as server:
             account.authenticate(client, prompt=prompt, password_prompt=password_prompt)
-            if getattr(args, "download_dir", None) is not None:
-                server.enable_downloads(args.download_dir, max_tasks=args.max_download_tasks)
+            tasks, busy = _task_folder(args), False
+            if tasks is not None:
+                try:
+                    server.enable_downloads(tasks, max_tasks=args.max_download_tasks)
+                except JobBusyError:
+                    # Only a folder the user chose is an error; the default one may belong to another server.
+                    if getattr(args, "download_dir", None) is not None:
+                        raise
+                    tasks, busy = None, True
             address, port = server.server_address[:2]
             if getattr(args, "json", False):
                 print_json({"event": "listening", "url": f"http://{address}:{port}/v1", "token_file": str(token_path),
-                            "downloads": getattr(args, "download_dir", None) is not None})
+                            "downloads": tasks is not None})
             else:
                 print(f"HTTP API: http://{address}:{port}/v1", file=sys.stderr, flush=True)
                 print(f"Bearer token file: {token_path}", file=sys.stderr, flush=True)
+                reason = ("another server uses the task folder" if busy else "anonymous server" if args.anonymous
+                          else "--no-downloads")
+                print("Downloads: on" if tasks is not None else f"Downloads: off ({reason})", file=sys.stderr, flush=True)
                 print("Press Ctrl+C to stop.", file=sys.stderr, flush=True)
             server.serve_forever()

@@ -167,14 +167,14 @@ and zlib-cli history before downloading this book again.` Download that book aga
 `downloads_unavailable`, `unauthorized` or `upstream_rate_limited`, with its `retryable` and
 `outcome`. The server's message is never shown. A response without a valid error object gives
 `local_api_error` (exit 1). Hints: `unauthorized`: `Use the token file of the running server
-(--token-file).`; `downloads_unavailable`: `Start the server with --download-dir DIR.`;
+(--token-file).`; `downloads_unavailable`: `Start the server without --no-downloads or --anonymous.`;
 `download_conflict`: `Use a new --key for a different book.`
 
 When the server cannot be reached, the code is `local_api_unavailable`:
 
 | Action | retryable / outcome | Exit | Hint |
 |---|---|---|---|
-| `list`, `show`, `watch`, `file`, `tui` | false / not_applied | 1 | `Start the server: zlib-cli serve --download-dir DIR` |
+| `list`, `show`, `watch`, `file`, `tui` | false / not_applied | 1 | `Start the server: zlib-cli serve` |
 | `add` | false / **unknown** | 4 | `Run the same command again with the same --key: the server replays it and never adds a second download.` |
 | `cancel` | false / **unknown** | 4 | `Check with: zlib-cli jobs show TASK_ID` |
 | `resume` | false / **unknown** | 4 | `Check with: zlib-cli jobs list` |

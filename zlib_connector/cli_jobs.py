@@ -68,7 +68,7 @@ _UNAVAILABLE = {
     "cancel": ("unknown", "Check with: zlib-cli jobs show {task_id}"),
     "resume": ("unknown", "Check with: zlib-cli jobs list"),
 }
-_READ_HINT = "Start the server: zlib-cli serve --download-dir DIR"
+_READ_HINT = "Start the server: zlib-cli serve"
 
 
 _QUEUE_STOPS = ("unauthorized", "forbidden", "downloads_unavailable", "local_api_unavailable")

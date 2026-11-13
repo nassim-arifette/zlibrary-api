@@ -166,10 +166,11 @@ ignores the file only.
   command line are refused there), and they never choose an edition. `shell` searches
   use only the filters typed in the shell.
 - **Folders.** `download_dir` is the default `--output` of `download` and `jobs file`.
-  A saved folder that is missing gives `config_invalid`. `serve --downloads` enables
-  download tasks in it (`--downloads` and `--download-dir` exclude each other; without
-  a saved folder it fails with `No download folder is configured. ...`). A saved folder
-  never enables tasks on its own: spending quota stays a choice made at each launch.
+  A saved folder that is missing gives `config_invalid`. `serve --downloads` keeps
+  download tasks in it (`--downloads`, `--download-dir` and `--no-downloads` exclude each
+  other; without a saved folder it fails with `No download folder is configured. ...`).
+  Otherwise a signed-in `serve` keeps its tasks in the state directory; quota is spent
+  only when a client submits a book.
 - **Local API.** `jobs` and `tui` default to `api_url`. Without `--host` and `--port`,
   `serve` listens on the host and port of an `api_url` set by `ZLIB_API_URL` or the file.
 - **Timeout.** Every command that makes requests, `serve`, `jobs`, `tui` and `mcp`.

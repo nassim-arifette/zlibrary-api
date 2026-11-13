@@ -7,14 +7,23 @@ or cancel a transfer. They use the same validated streaming download as
 
 ## Enable tasks
 
-Create a download directory, then start an authenticated server:
+A signed-in server enables tasks by default:
 
 ```sh
+zlib-cli serve
 zlib-cli serve --download-dir ./downloads --max-download-tasks 1000
+zlib-cli serve --no-downloads
 ```
 
-The directory must already exist. Download tasks are disabled unless you pass
-`--download-dir`; they cannot be enabled with `--anonymous`. The server binds its
+Without a folder, tasks live in `downloads` inside the local state directory
+(`%LOCALAPPDATA%\zlibrary-api` on Windows, `~/.local/state/zlibrary-api`
+elsewhere, or `ZLIB_STATE_DIR`), created if needed. `--download-dir DIR` uses an
+existing directory instead, and `--downloads` the `download_dir` setting's
+folder. `--no-downloads` turns tasks off, and an `--anonymous` server never has
+them. If another server or the MCP server already owns the default folder's
+journal for this account, the server starts with downloads off and says so; a
+folder you chose stops startup instead. Enabling tasks spends nothing: quota is
+used only when a client submits a book. The server binds its
 port and verifies the account before starting the worker. It uses one worker and
 serializes all upstream client operations. Task polling, cancellation and file
 retrieval do not wait for that lock.

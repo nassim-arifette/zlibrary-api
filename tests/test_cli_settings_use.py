@@ -327,13 +327,16 @@ class SettingsUseTests(unittest.TestCase):
             code = main(["serve", *argv])
         return code, seen, stderr.getvalue()
 
-    def test_serve_downloads_needs_a_configured_folder_that_never_enables_tasks_alone(self):
+    def test_serve_downloads_needs_a_configured_folder_that_is_never_the_default_task_folder(self):
         code, seen, err = self.serve("--downloads", "--json")
         self.assertEqual((2, "invalid_argument"), (code, json.loads(err)["code"]))
         self.assertIn("No download folder is configured", json.loads(err)["message"])
         self.configure(download_dir=str(self.books))
         code, seen, _ = self.serve()
         self.assertEqual(0, code)
+        from zlib_connector.http_cli import default_task_folder
+        self.assertEqual(default_task_folder(), seen["downloads"])
+        code, seen, _ = self.serve("--no-downloads")
         self.assertNotIn("downloads", seen)
         code, seen, _ = self.serve("--downloads")
         self.assertEqual(self.books, seen["downloads"])

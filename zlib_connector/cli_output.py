@@ -41,7 +41,7 @@ _HINTS = {
     "download_unavailable": "Check: zlib-cli quota",
     "internal_error": "Set ZLIB_DEBUG=1 to show details.",
     "unauthorized": "Use the token file of the running server (--token-file).",
-    "downloads_unavailable": "Start the server with --download-dir DIR.",
+    "downloads_unavailable": "Start the server without --no-downloads or --anonymous.",
     "download_conflict": "Use a new --key for a different book.",
 }
 QUOTA_HINT = ("The download may have used quota. Check zlib-cli quota and zlib-cli history before downloading this"

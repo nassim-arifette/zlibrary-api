@@ -205,7 +205,7 @@ private one for the session and stops it when you quit.
 `d` on a book asks for confirmation, then downloads it into your `download_dir` setting (else your
 Downloads folder) and shows the progress at the bottom; `x` cancels. Each confirmation is one
 download from your daily allowance, and a failed download is never retried on its own. With your
-own `zlib-cli serve`, start it with `--downloads` (or `--download-dir DIR`) to download from the TUI.
+own `zlib-cli serve`, downloads work too unless you started it with `--no-downloads`.
 
 ![The terminal interface showing a favorites list, with the selected book's details above it](docs/images/tui.png)
 
@@ -277,8 +277,8 @@ email, password, cookie or token is ever stored there.
   proxy with HTTP CONNECT; TLS still runs end to end to the site. `--no-proxy` connects directly.
   `HTTP_PROXY` and `HTTPS_PROXY` are ignored, and `jobs`, `queue` and `tui` always talk to the local API
   directly. `doctor` says which proxy it went through.
-- `download_dir` is the default `--output` of `download` and `jobs file`. `serve --downloads` starts
-  the download queue there; a saved folder never starts it on its own.
+- `download_dir` is the default `--output` of `download` and `jobs file`. `serve --downloads` keeps
+  the download queue's tasks there instead of in the state folder.
 - A saved `domain` is used instead of the saved session's domain. When they differ, account commands
   stop and say which setting chose the domain; run `zlib-cli login` there, or change the setting.
   `doctor` still probes every known domain and says how to save the one it suggests.
@@ -355,8 +355,7 @@ through the server. Only local connections are accepted, browsers only from orig
 ### Download queue
 
 ```sh
-mkdir downloads
-zlib-cli serve --download-dir downloads
+zlib-cli serve
 # in a second terminal:
 zlib-cli jobs add ID:HASH --key dune-epub-001
 zlib-cli jobs list
@@ -365,7 +364,10 @@ zlib-cli jobs file 0123456789abcdef0123456789abcdef --output books
 zlib-cli queue add -a reading-list.json --key reading
 ```
 
-The server downloads queued books one at a time. `--key` is required and names the request: sending
+A signed-in server accepts downloads by default and keeps its tasks in the state folder
+(`--download-dir DIR` chooses another folder, `--no-downloads` turns the queue off; an `--anonymous`
+server has none). Nothing is downloaded until a client asks for a book. The server downloads queued
+books one at a time. `--key` is required and names the request: sending
 the same key and book again returns the same task instead of a second download. `jobs add` and
 `jobs list` print each task's 32-character ID, which `show`, `watch`, `cancel` and `file` take (the
 ID above is an example). `jobs file` copies a finished book without downloading it again. When the
