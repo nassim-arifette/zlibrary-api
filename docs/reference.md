@@ -9,8 +9,9 @@ catalog client; ordinary Python and CLI use does not require Textual.
 ## CLI behavior
 
 Global options (`--domain`, `--credentials`, `--timeout`, `--session-file`,
-`--no-session`, `--json`, `--no-input`, `--interactive`) work before or after the
-command, and after an action such as `favorites add`. `zlib-cli --version` prints
+`--no-session`, `--json`, `--no-input`, `--interactive`, `--config`, `--no-config`)
+work before or after the command, and after an action such as `favorites add`.
+Saved [settings](#settings) supply defaults for several of them. `zlib-cli --version` prints
 the installed version.
 Repeat `--format` and `--language` to select several formats/languages. Search and
 query-based download also accept `--year-from`, `--year-to` and `--order`:
@@ -95,6 +96,167 @@ always ASCII-escaped.
 Optionally install the console entry point with `python -m pip install -e .` and
 use `zlib-cli` with the same arguments. Installation is not needed for `python -m`.
 
+## Settings
+
+`config.toml` keeps preferences between runs. It never holds an email, password,
+cookie, session or token: such keys are refused.
+
+| File | Windows | Linux and macOS | Override |
+|---|---|---|---|
+| `config.toml` | `%APPDATA%\zlibrary-api\config.toml` (`~\AppData\Roaming` when `APPDATA` is unset) | `$XDG_CONFIG_HOME/zlibrary-api/config.toml` when that variable is absolute, else `~/.config/zlibrary-api/config.toml` | `--config FILE`, then `ZLIB_CONFIG`; `--no-config` ignores the file for one run |
+| `credentials.toml` | the default folder above | the default folder above | `--credentials FILE`, `ZLIB_CREDENTIALS`, or the key `credentials_file` |
+| `config.toml.lock` | beside the config file | beside the config file | |
+
+The session, the API token and the job store stay in the state directory
+(`ZLIB_STATE_DIR`, `%LOCALAPPDATA%\zlibrary-api`, `~/.local/state/zlibrary-api`).
+A file named by `--config` or `ZLIB_CONFIG` must exist, except for the `config`
+commands, which treat it as empty (`config set` creates it; its folder must exist).
+Only `config set` and `config unset` create the default folder, with mode `0o700`.
+`--config` and `--no-config` exclude each other, and the `config` commands refuse
+`--no-config`.
+
+### Keys
+
+| Key | TOML type | Rules | Option | Variable | Default |
+|---|---|---|---|---|---|
+| `domain` | string | HTTPS origin, saved as `https://host/` | `--domain` | `ZLIB_DOMAIN` | unset (see below) |
+| `timeout` | integer or float | more than 0, at most 300 | `--timeout` | `ZLIB_TIMEOUT` | 30 |
+| `download_dir` | string | absolute (`~` is expanded); `config set` requires an existing folder | `download --output`, `jobs file --output` | `ZLIB_DOWNLOAD_DIR` | the current directory |
+| `languages` | array of strings | 1 to 64 printable characters each, at most 50, lowercased | `--language` | `ZLIB_LANGUAGES` | none |
+| `formats` | array of strings | `pdf`, `epub`, `djvu` | `--format` | `ZLIB_FORMATS` | none |
+| `api_url` | string | loopback HTTP, optional `/v1`; saved as `http://HOST:PORT/v1` | `--api-url` (`jobs`, `tui`) | `ZLIB_API_URL` | `http://127.0.0.1:8000/v1` |
+| `credentials_file` | string | absolute; must exist when used | `--credentials` | `ZLIB_CREDENTIALS` | the lookup below |
+
+The file is TOML 1.0 in UTF-8 (a BOM is accepted), at most 64 KiB, one flat table.
+Reading is strict: an unknown key, a table, a wrong type or a bad value stops every
+command (except `config path`) before any request, with `config_invalid` (exit 2).
+Messages name the key and the source (`ZLIB_TIMEOUT`, or the file and key) and never
+show the value or the file's content. A bad command-line value stays
+`invalid_argument` (exit 2).
+
+**Precedence**, for every key: an option given in this run, then the variable when it
+is not empty, then the file (unless `--no-config`), then the default. Lists replace
+each other and never merge; a variable's list is comma-separated. `--no-config`
+ignores the file only.
+
+### What uses them
+
+- **Filters.** Saved `formats` and `languages` apply to `search`, to `download QUERY`
+  and to the searched items of a list, unless the command gives its own `--format` or
+  `--language`. Each run says so once on stderr, for example
+  `Using formats from the config file: epub. Use --format to replace them, or
+  --no-config to ignore the file.` They never apply to an `ID:HASH` reference or a
+  book URL, so `download ID:HASH` works with saved formats (only formats given on the
+  command line are refused there), and they never choose an edition. `shell` searches
+  use only the filters typed in the shell.
+- **Folders.** `download_dir` is the default `--output` of `download` and `jobs file`.
+  A saved folder that is missing gives `config_invalid`. `serve --downloads` enables
+  download tasks in it (`--downloads` and `--download-dir` exclude each other; without
+  a saved folder it fails with `No download folder is configured. ...`). A saved folder
+  never enables tasks on its own: spending quota stays a choice made at each launch.
+- **Local API.** `jobs` and `tui` default to `api_url`. Without `--host` and `--port`,
+  `serve` listens on the host and port of an `api_url` set by `ZLIB_API_URL` or the file.
+- **Timeout.** Every command that makes requests, `serve`, `jobs`, `tui` and `mcp`.
+- **MCP.** `zlib-cli mcp` resolves `domain` and `timeout` the same way. It never reads
+  credentials, and `--download-dir` stays its only way to enable downloads. A bad
+  setting is a one-line startup refusal (exit 1). `--print-config` copies `ZLIB_CONFIG`,
+  `XDG_CONFIG_HOME`, `ZLIB_DOMAIN` and `ZLIB_TIMEOUT` when they are set, because MCP
+  clients pass few variables; the default location needs only `APPDATA` or `HOME`.
+
+### Domain selection
+
+Account commands (`login`, `auth-test`, `profile`, `quota`, `library`, `favorites`,
+`history`, `booklists`, `tags`, `download`, `shell`, `serve`, and the catalog commands
+without `--anonymous`) take the first of:
+
+1. `--domain`;
+2. `ZLIB_DOMAIN`;
+3. the key `domain`;
+4. the `domain` of a named credentials file (`--credentials`, `ZLIB_CREDENTIALS` or
+   `credentials_file`), only if the file sets one;
+5. the saved session's domain;
+6. the `domain` of the credentials file found by the lookup, if it sets one;
+7. `https://z-lib.by/`.
+
+When a saved session will be restored and levels 1 to 4 chose another domain, the
+command stops with `session_domain_mismatch` (exit 2):
+`The saved session belongs to another domain than the one set by the config file
+(domain). Run zlib-cli login to sign in there, or use --no-session.` The source is
+`--domain`, `ZLIB_DOMAIN`, `the config file (domain)` or `the credentials file
+(domain)`. `config set domain` warns when the saved session belongs to another domain.
+
+`--anonymous` commands, `check` and `serve --anonymous` use `--domain`, `ZLIB_DOMAIN`,
+the key `domain`, then `https://z-lib.by/`, and read neither the session nor the
+credentials. `doctor` probes its arguments, `--domain` or the known candidates; it
+ignores the variable and the key. In text mode it adds `Configured domain: URL
+(config)` and, when it suggests another domain, `To use it: zlib-cli config set domain
+URL`. `status` and `logout` compare the session only with `--domain`; a different
+environment or saved domain prints a note on stderr and they still succeed.
+
+### Credentials file
+
+Sign-in reads the first of: a named file (`--credentials`, relative to the current
+directory, else `ZLIB_CREDENTIALS`, else `credentials_file`), which must exist;
+`credentials.toml` in the default settings folder; the legacy `credentials.local.toml`
+beside the package, with a one-line note per run suggesting the move. Without a file,
+the email and password are asked when a terminal allows it.
+
+### The `config` command
+
+```text
+zlib-cli config path   [--json]
+zlib-cli config list   [--show-origin] [--json]
+zlib-cli config get    KEY [--json]
+zlib-cli config set    KEY VALUE... [--json]
+zlib-cli config unset  KEY [--json]
+```
+
+`config` never contacts the network and never reads the credentials file or the API
+token; `config set domain` reads the saved session only for its note.
+
+- `path` prints the file path (stderr adds `(not created yet; ...)` when it is missing).
+- `list` prints one aligned row per key, `(not set)` for an empty value;
+  `--show-origin` adds `default`, `config`, `env ZLIB_LANGUAGES` or `cli --timeout`.
+- `get` prints a value, a list one item per line, or nothing when unset.
+- `set` takes one value for a scalar and one or more for a list (`formats epub,pdf`
+  equals `formats epub pdf`), normalizes it (canonical domain, absolute paths,
+  lowercased lists) and prints `Set formats = epub, pdf in PATH.` An empty list cannot
+  be set; use `unset`.
+- `unset` prints `Removed formats from PATH.` or `formats was not set in PATH.`
+
+`set` and `unset` change only this local file, so they ask nothing. They also repair
+a file whose only problem is the value of that same key; anything else is refused with
+`Fix or remove the config file first: PATH`. They rewrite the file (a fixed header,
+then the keys in the order above, ASCII) and drop comments, with a note. A note also
+says when a `ZLIB_*` variable overrides the value just written.
+
+Writes take the lock `config.toml.lock` (5 seconds, then `config_busy`, exit 3), read
+the file and its SHA-256, write a private temporary file in the same folder, flush it
+to disk, check under the lock that the file has not changed (`config_conflict`, exit 3,
+when another program wrote it), then replace it atomically. A linked config file is
+read through the link but never replaced (`config set refuses a linked config file;
+edit its target directly.`). The JSON shapes are in [CLI output](cli-json.md#settings).
+
+### Python
+
+```python
+from zlib_connector import load_settings
+
+settings = load_settings(overrides={"timeout": 10})
+settings.timeout             # 10.0
+settings.origins["timeout"]  # ("cli", "--timeout"); ("env", "ZLIB_TIMEOUT"); ("config", None); ("default", None)
+```
+
+`load_settings(overrides=None, *, environ=None, config_file=None, use_config=True)`
+returns a frozen `Settings` (`domain` covers levels 1 to 3 only, `timeout`,
+`download_dir`, `languages`, `formats`, `api_url`, `credentials_file`, plus
+`config_path`, `config_exists` and `origins`). In `overrides`, `None` means not given.
+It raises `SettingsError` (a `ValueError` with `code`, `key` and `source`), never
+prints, never touches the network and never reads credentials, the session or the
+token. `Client`, `SessionStore` and `DownloadManager` never read settings.
+`zlib_connector.credentials.credentials_path()` gives the file `load_credentials()`
+reads, and `Credentials.has_domain` says whether that file set `domain`.
+
 ## Python API
 
 ### Persistent sessions
@@ -160,9 +322,8 @@ server refuses it, and the usual codes for other failures. `--no-session` cannot
 commands. A supplied `--domain` must match before `status` or `logout` can act on
 an existing session.
 
-Domain selection for account commands is: explicit `--domain`, the domain in an
-explicit `--credentials` file, saved session origin, then the default credentials
-domain. Explicit `login` still reads credentials for fresh authentication.
+Domain selection for account commands is described under [Settings](#domain-selection).
+Explicit `login` still reads credentials for fresh authentication.
 Ordinary commands reuse the saved session; if none exists, they retain their
 previous in-memory login behavior. `auth-test` ignores persistent sessions.
 Anonymous commands and domain diagnostics do not access session or credential
@@ -330,8 +491,10 @@ an existing report are checked before a request is sent, and before credentials
 are read except with `-a -`. A missing `--yes` is refused before anything is
 read. `-a -` checks for a saved session or an email in the credentials file
 before it reads standard input, so a refusal does not consume the list. A list
-that is the credentials file itself (the default one or `--credentials FILE`) is
-refused without being read.
+that is the credentials file a sign-in would read (found by the lookup of
+[Settings](#credentials-file), or named with `--credentials FILE`, `ZLIB_CREDENTIALS`
+or `credentials_file`) is refused without being read. Saved `formats` and
+`languages` apply to the searched items of a list, never to references.
 
 A run is **interactive** when prompts are allowed (stdin and stderr are terminals,
 or `--interactive` is given, and neither `--no-input` nor `ZLIB_NO_INPUT` is set) and

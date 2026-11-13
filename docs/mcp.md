@@ -26,14 +26,15 @@ zlib-cli [--domain ORIGIN] [--timeout SECONDS] [--session-file FILE] mcp
 | `--no-download-confirmation` | Needs `--download-dir`. Claude Code no longer asks you to confirm each `download_book` and `resume_downloads` call. Account changes still ask. Use it only if you approve downloads in bulk. |
 | `--allow-account-changes` | Adds the 9 tools that change favorites, tags and booklists. |
 | `--print-config CLIENT` | Prints a registration snippet for `claude-code`, `claude-desktop` or `codex` and exits, without serving. |
-| `--timeout SECONDS` | Deadline of every request, from 0 to 300 seconds (default 30). It also applies to a **whole book transfer**: use `--timeout 120` or more with downloads. |
-| `--domain`, `--session-file` | As for the other commands. `--domain` must match the saved session's domain. |
+| `--timeout SECONDS` | Deadline of every request, from 0 to 300 seconds (default: the `timeout` setting, else 30). It also applies to a **whole book transfer**: use `--timeout 120` or more with downloads. |
+| `--domain`, `--session-file`, `--config`, `--no-config` | As for the other commands. The domain (`--domain`, `ZLIB_DOMAIN` or the `domain` setting) must match the saved session's domain. A saved `download_dir` never enables the download tools. |
 
 The server never asks for a password and never reads `credentials.local.toml`; sign in once with
 `zlib-cli login` in a terminal. It refuses to start, with one line on stderr and exit code 1, when given
 `--credentials` or `--no-session`, `--anonymous` with an action flag or `--session-file`,
 `--no-download-confirmation` without `--download-dir`, a timeout outside (0, 300], an unusable download folder,
-or a `--domain` that differs from the saved session. A missing or expired session does not stop it:
+a `--domain` or configured domain that differs from the saved session, or an invalid setting
+([Settings](reference.md#settings)). A missing or expired session does not stop it:
 `server_status` reports it.
 
 ## Register it
@@ -49,7 +50,9 @@ zlib-cli --timeout 120 mcp --download-dir /path/to/Books --print-config claude-c
 **State directory.** Clients pass only a few environment variables to the server. If you set `ZLIB_STATE_DIR`
 (or `XDG_STATE_HOME` on Linux), pass it through the client's `env` setting, or use `--session-file`; otherwise
 the server does not find the session saved by `zlib-cli login` and `server_status` shows the session state
-`empty`. `--print-config` copies these variables when they are set.
+`empty`. The same holds for `ZLIB_CONFIG`, `XDG_CONFIG_HOME`, `ZLIB_DOMAIN` and `ZLIB_TIMEOUT`; the default
+settings file needs only `APPDATA` (Windows) or `HOME`, which clients pass. `--print-config` copies these
+variables when they are set.
 
 ### Claude Code
 

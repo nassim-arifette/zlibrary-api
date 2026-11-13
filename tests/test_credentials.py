@@ -43,6 +43,30 @@ class CredentialTests(unittest.TestCase):
             password_prompt.assert_not_called()
         self.assertEqual(stdout.getvalue().strip(),'{"authenticated": true}')
 
+    def test_lookup_order_and_has_domain(self):
+        from zlib_connector import credentials as module, local_state
+        from zlib_connector.credentials import credentials_path
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            folder, legacy = root / 'config', root / 'legacy.toml'
+            folder.mkdir()
+            with patch.object(local_state, 'config_directory', lambda: folder),                     patch.object(module, 'DEFAULT_FILE', legacy):
+                self.assertIsNone(credentials_path())
+                self.assertFalse(load_credentials().has_domain)
+                legacy.write_text('email="legacy@example.com"', encoding='utf-8')
+                self.assertEqual(legacy, credentials_path())
+                credentials = load_credentials()
+                self.assertEqual(('legacy@example.com', False, 'https://z-lib.by/'),
+                                 (credentials.email, credentials.has_domain, credentials.domain))
+                (folder / 'credentials.toml').write_text('domain="https://new.example/"', encoding='utf-8')
+                self.assertEqual(folder / 'credentials.toml', credentials_path())
+                credentials = load_credentials()
+                self.assertEqual(('https://new.example/', True), (credentials.domain, credentials.has_domain))
+                explicit = root / 'explicit.toml'
+                self.assertEqual(explicit, credentials_path(explicit))
+                with self.assertRaises(ValueError):
+                    load_credentials(explicit)
+
     def test_domain_override_is_explicit(self):
         with patch('zlib_connector.cli.load_credentials',return_value=Credentials('https://old.example/','synthetic','synthetic')), patch('zlib_connector.cli.Client') as constructor, patch('sys.stdout',io.StringIO()):
             main(['--domain','https://new.example/','auth-test'])

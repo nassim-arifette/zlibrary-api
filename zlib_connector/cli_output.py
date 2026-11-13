@@ -10,6 +10,7 @@ import traceback
 
 from .error_codes import Coded, ErrorCode, classify
 from .errors import ConnectorError
+from .settings import SettingsError
 from .terminal_text import terminal_text
 from .transfer import TransferCancelled
 
@@ -23,10 +24,10 @@ EXIT_CODES = (
     (5, "Sign in first: no usable session or credentials"),
     (130, "Cancelled: Ctrl+C, end of input, declined, cancelled transfer"),
 )
-_USAGE = frozenset({"invalid_argument", "input_required", "session_domain_mismatch"})
+_USAGE = frozenset({"invalid_argument", "input_required", "session_domain_mismatch", "config_invalid"})
 _SIGN_IN = frozenset({"upstream_authentication_required"})
 _LATER = frozenset({"upstream_rate_limited", "upstream_timeout", "upstream_network_error", "download_unavailable",
-                    "session_busy", "client_busy", "server_busy", "downloads_busy", "download_not_ready"})
+                    "session_busy", "config_busy", "config_conflict", "client_busy", "server_busy", "downloads_busy", "download_not_ready"})
 _CHECK = frozenset({"session_conflict", "mutation_uncertain"})
 
 _HINTS = {
@@ -184,7 +185,11 @@ def describe(error, *, operation="read", args=None, command=None) -> dict:
         value["reason"] = reason
     if result.quota_may_be_used is not None:
         value["quota_may_be_used"] = result.quota_may_be_used
-    hint = getattr(error, "hint", None) if isinstance(error, CommandError) else None
+    hint = getattr(error, "hint", None) if isinstance(error, (CommandError, SettingsError)) else None
+    if isinstance(error, SettingsError):
+        for name in ("key", "source"):
+            if isinstance(getattr(error, name), str):
+                value[name] = getattr(error, name)
     if operation == "account_change" and result.outcome == "unknown":
         hint = _mutation_hint(args)
     elif result.quota_may_be_used:

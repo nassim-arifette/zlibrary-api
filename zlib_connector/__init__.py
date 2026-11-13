@@ -14,6 +14,7 @@ from .sessions import SessionConflictError, SessionError, SessionLockTimeoutErro
 from .jobs import DownloadManager, DownloadTask, TaskEvent, TaskSubscription, TaskPage
 from .batch import (BatchEntry, BatchInputError, BatchItem, BatchPlan, BatchReport, BatchReportError, StopPlanning,
                     load_report, parse_batch, pick, plan_batch, run_batch)
+from .settings import Settings, SettingsError, load_settings
 from .errors import (
     AuthenticationError, BooklistNotFoundError, ChallengeRequired, ConnectorError, DownloadError,
     FormatChangedError, MutationUncertainError, NetworkError, RateLimitError,
@@ -30,6 +31,7 @@ __all__ = [
     "BatchItem", "BatchEntry", "BatchPlan", "BatchReport", "BatchInputError", "BatchReportError", "StopPlanning",
     "parse_batch", "plan_batch", "run_batch", "load_report", "pick",
     "DomainDiagnostic", "DomainReport", "diagnose_domains",
+    "Settings", "SettingsError", "load_settings",
     "ConnectorError", "AuthenticationError", "ChallengeRequired", "DownloadError",
     "FormatChangedError", "MutationUncertainError", "NetworkError", "RateLimitError", "BooklistNotFoundError",
 ]

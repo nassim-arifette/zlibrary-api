@@ -407,7 +407,7 @@ class BatchCliTests(unittest.TestCase):
                              (["--credentials", str(other), "download", "-a", str(other), "--pick", "1", "--yes"],
                               "the credentials file, not"),
                              (["download", "-a", str(backup), "--pick", "1", "--yes"], "a credentials setting")):
-            with self.subTest(args=args[:2]), patch("zlib_connector.cli_batch.DEFAULT_FILE", default):
+            with self.subTest(args=args[:2]), patch("zlib_connector.credentials.DEFAULT_FILE", default):
                 code, out, errors, _, constructor, prompt, loader = self.run_cli(args)
                 self.assertEqual(code, 2)
                 self.assertIn(reason, errors)

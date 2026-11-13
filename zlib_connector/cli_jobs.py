@@ -6,6 +6,7 @@ from pathlib import Path
 import time
 
 from .cli_output import CommandError, print_json
+from .cli_settings import default_output, ensure_settings
 from .errors import NetworkError
 from .jobs.events import validate_event_id
 from .local_api import LocalAPI, task_id
@@ -15,7 +16,8 @@ from .jobs.models import TERMINAL_STATES, validate_idempotency_key, validate_tas
 
 def add_jobs_parser(commands):
     command = commands.add_parser("jobs", help="manage downloads on a running local API server")
-    command.add_argument("--api-url", default="http://127.0.0.1:8000/v1", help="loopback HTTP API address")
+    command.add_argument("--api-url", help="loopback HTTP API address (default: the api_url setting, else"
+                         " http://127.0.0.1:8000/v1)")
     command.add_argument("--token-file", type=Path, help="existing server token file (default: state directory/api-token)")
     actions = command.add_subparsers(dest="job_action", required=True)
     for name in ("add", "list", "show", "cancel", "resume", "file", "watch"):
@@ -29,7 +31,8 @@ def add_jobs_parser(commands):
             action.add_argument("--limit", type=int, default=50)
             action.add_argument("--offset", type=int, default=0)
         if name == "file":
-            action.add_argument("--output", type=Path, default=Path.cwd(), help="existing directory for a validated local copy")
+            action.add_argument("--output", type=Path, help="existing directory for a validated local copy (default:"
+                                " the download_dir setting, else the current directory)")
         if name == "watch":
             action.add_argument("--duration", type=float, default=60, help="total observation time, 1-3600 seconds (default: 60)")
             action.add_argument("--after", help="last observed event cursor; reconnects receive current state")
@@ -46,6 +49,7 @@ _READ_HINT = "Start the server: zlib-cli serve --download-dir DIR"
 
 def run_jobs(args) -> int:
     """Return the exit status: 0, or for watch 0, 3 or 4 (docs/cli-json.md)."""
+    ensure_settings(args)
     try:
         return _run(args)
     except NetworkError as error:
@@ -89,7 +93,7 @@ def _run(args) -> int:
     elif args.job_action == "resume":
         value = api.request("POST", path + "/resume")
     elif args.job_action == "file":
-        value = {"path": str(api.file(args.task_id, args.output))}
+        value = {"path": str(api.file(args.task_id, default_output(args)))}
     else:
         path += "/" + args.task_id
         value = api.request("POST", path + "/cancel") if args.job_action == "cancel" else api.request("GET", path)

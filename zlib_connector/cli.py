@@ -19,6 +19,8 @@ from .cli_jobs import run_jobs
 from .cli_tui import run_tui
 from .cli_progress import ProgressDisplay
 from .cli_batch import is_batch, run_batch_command
+from .cli_config import run_config
+from .cli_settings import cli_domain, default_output, ensure_settings, with_configured_filters
 from .cli_session import AccountSession, local_session_command, session_message
 from .cli_output import CommandError, InputRequired, prepare_streams, print_json, report_error, wants_json
 from .cli_terminal import InputPolicy, ask, choose, confirm, password
@@ -88,6 +90,12 @@ def shell(client: Client, *, progress=None):
         except (ConnectorError, ValueError, OSError) as error:
             print(f"{type(error).__name__}: {error}", file=sys.stderr)
 
+def _announce(args, cli_filters):
+    """The stderr notice for configured formats or languages, once, just before the search request."""
+    if cli_filters is not None:
+        with_configured_filters(args, cli_filters)
+
+
 class _Operation:
     """Which call is running, for classify(): a read, an account change or a download."""
 
@@ -130,7 +138,10 @@ def _run(argv, operation) -> int:
             command_parser.error("unrecognized arguments: " + " ".join(extras))
         args.query = [*args.query, *extras]
     if args.command == "mcp":
-        return run_mcp(args, client_factory=Client)
+        return run_mcp(args, client_factory=Client)  # Loads the settings itself; refusals keep their one line.
+    if args.command == "config":
+        return run_config(args)
+    ensure_settings(args)
     policy = InputPolicy.from_args(args)
 
     def ask_line(label):
@@ -140,6 +151,7 @@ def _run(argv, operation) -> int:
         return password(label, policy=policy, read=lambda text: getpass.getpass(text, stream=sys.stderr))
 
     if args.command == "download":
+        args.output = default_output(args)
         if is_batch(args):
             return run_batch_command(args, client_factory=Client, credentials_loader=load_credentials,
                                      prompt=ask_line, password_prompt=ask_password, policy=policy)
@@ -169,7 +181,9 @@ def _run(argv, operation) -> int:
             print("\n".join(KNOWN_DOMAINS))
         return 0
     if args.command == "doctor":
-        domains = args.domains or ([args.domain] if args.domain else None)
+        # doctor finds working domains: it ignores the environment's and the config file's domain.
+        explicit = cli_domain(args)
+        domains = args.domains or ([explicit] if explicit else None)
         report = diagnose_domains(domains, timeout=args.timeout, workers=args.workers)
         if args.json:
             print_json(report.to_dict())
@@ -178,6 +192,12 @@ def _run(argv, operation) -> int:
                 state = "ok" if result.search_ok else result.error_code
                 print(f"{result.domain}  {state}  {result.elapsed_ms} ms  {result.message}")
             print(f"Suggested domain: {report.recommended_domain or 'none'}")
+            configured = args.settings.domain if explicit is None else None
+            if configured is not None:
+                origin = "config" if args.settings.origin("domain") == "config" else args.domain_source
+                print(f"Configured domain: {configured} ({origin})")
+                if report.recommended_domain and report.recommended_domain != configured:
+                    print(f"To use it: zlib-cli config set domain {report.recommended_domain}")
         return 0 if report.recommended_domain else 1
     if args.command == "check":
         domain = args.domain or "https://z-lib.by/"
@@ -190,6 +210,7 @@ def _run(argv, operation) -> int:
         raise InputRequired("The shell needs a terminal. Use search and download in scripts, or add --interactive"
                             " to read commands from standard input.")
     filters = None
+    cli_filters = None  # A search's own filters; configured ones are announced just before it runs.
     reference = None
     favorite_change = args.command == "favorites" and args.favorite_action in ("add", "remove")
     booklist_change = args.command == "booklists" and args.booklist_action in BOOKLIST_MUTATIONS
@@ -228,8 +249,12 @@ def _run(argv, operation) -> int:
             raise ValueError("Choose an existing output directory and a positive --pick number.")
         if args.command == "download" and (re.match(r"^[0-9]+:", args.query) or "://" in args.query):
             reference = args.query
+            # Only filters given on the command line conflict; configured ones never apply to a reference.
             if args.pick is not None or filters != SearchFilters() or args.page != 1 or args.limit != 20:
                 raise ValueError("Search filters and --pick cannot be used with a direct book reference.")
+        else:
+            cli_filters = filters
+            filters = with_configured_filters(args, filters, announce=False)
         if args.command == "download" and reference is None and args.pick is None and not policy.allowed:
             raise InputRequired("Choosing a search result needs a terminal. Add --pick N, or download an ID:HASH"
                                 " reference.")
@@ -237,6 +262,7 @@ def _run(argv, operation) -> int:
         BookReference.parse(reference, args.domain)
     if args.command in CATALOG_COMMANDS and getattr(args, "anonymous", False):
         with Client(args.domain or "https://z-lib.by/", timeout=args.timeout) as client:
+            _announce(args, cli_filters)
             run_catalog_command(client, args, filters)
         return 0
     account = AccountSession(args, credentials_loader=load_credentials)
@@ -260,6 +286,7 @@ def _run(argv, operation) -> int:
             shell(client, progress=args.progress)
             return 0
         if args.command in CATALOG_COMMANDS:
+            _announce(args, cli_filters)
             run_catalog_command(client, args, filters)
             return 0
         if args.command in ("profile", "quota"):
@@ -278,6 +305,7 @@ def _run(argv, operation) -> int:
         if reference is not None:
             selected = reference
         else:
+            _announce(args, cli_filters)
             books = client.search(args.query, filters=filters, page=args.page, limit=args.limit)
             if not books:
                 raise CommandError("No supported books found for this query.", code="not_found")

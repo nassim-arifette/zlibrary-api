@@ -1,7 +1,7 @@
 # zlib-cli: complete CLI implementation spec
 
-Design, 2026-11-11. Status on 2026-11-12: D1 implemented (see `docs/cli-json.md`); D2 to D7 not implemented yet. The
-owner decided the open questions on 2026-11-12 (section 10).
+Design, 2026-11-11. Status on 2026-11-12: D1 and D2 implemented (see `docs/cli-json.md` and the Settings section of
+`docs/reference.md`); D3 to D7 not implemented yet. The owner decided the open questions on 2026-11-12 (section 10).
 
 - **Request:** the owner's "cli complet" item: a coherent command set, JSON for every command (errors
   included), documented exit codes, a strict non-interactive mode, lists on standard input, messages kept
@@ -954,6 +954,47 @@ settings.origins["timeout"]   # ("cli", None); ("env", "ZLIB_TIMEOUT"); ("config
   own.
 - [ ] Docs, migration notes and CI green on the 4 configurations.
 
+### 5.17 Implementation notes (2026-11-12)
+
+D2 shipped as one commit, `Add CLI settings`, on top of D1, the MCP server and the TUI. Where it differs from the
+text above:
+
+- **Docs.** No new `docs/configuration.md`: the settings are a "Settings" section of `docs/reference.md` (locations,
+  keys, precedence, domain chain, credentials lookup, `config`, Python), the JSON shapes and codes are in
+  `docs/cli-json.md`, and the README has a short "Save your preferences" section. `docs/mcp.md` and
+  `credentials.example.toml` point to them.
+- **Modules.** `settings.py` (resolver, strict reader, writer, `ConfigStore`), `cli_settings.py` (one load per run,
+  argument filling, once-per-run notices, configured filters), `cli_config.py` (the command). `local_state.py` gains
+  `default_config_directory()` and `config_directory()`; `credentials.py` gains `credentials_path()`,
+  `default_credentials_file()` and `Credentials.has_domain` (default `True`, so code that builds `Credentials` by
+  hand keeps today's chain).
+- **Origins.** `Settings.origins["timeout"]` is `("cli", "--timeout")` rather than `("cli", None)`, so `config list
+  --show-origin` and the JSON `option` field can name the option.
+- **CLI values are validated by the resolver** (`invalid_argument`, exit 2, `source: "cli"`), including commands that
+  ignored them before (`zlib-cli --timeout 0 domains` now exits 2). An explicit `--domain` and `--api-url` are passed
+  on as typed; environment and file values are normalized.
+- **`credentials.toml` lives in the default settings folder** even when `--config` or `ZLIB_CONFIG` names a file
+  elsewhere. `config path --json` reports as `credentials_path` the file a sign-in would read, else the default
+  place for one, with `credentials_exists`.
+- **Notices.** The filter notice is printed just before the search request (after local checks), so a run refused by
+  a local check shows only its error object. The `status` and `logout` note names the source of the configured
+  domain. `shell` searches do not use configured filters.
+- **Lists.** Configured filters join the batch filters only when the list has searched items. A reference item whose
+  format is not among them gets the existing informational line ("Search filters apply only to searches; ...");
+  nothing is refused or chosen.
+- **`serve`.** `--downloads` and `--download-dir` are an argparse mutually exclusive group (exit 2). `--host` and
+  `--port` keep their documented defaults; a marker type tells the default apart, so an explicit
+  `--port 8000` still wins over `api_url`.
+- **MCP.** `zlib-cli mcp` loads the settings itself (its tests call `run_mcp` directly). A settings error is its usual
+  one-line refusal, exit 1, as D1 kept for every MCP startup refusal. The domain and timeout follow section 5.5; a
+  named or configured credentials file is ignored (MCP never reads credentials) and only `--credentials` is refused.
+  `--print-config` embeds `--domain` only when given on the command line, adds `--config FILE` or `--no-config`
+  when given, and copies `ZLIB_CONFIG`, `XDG_CONFIG_HOME`, `ZLIB_DOMAIN` and `ZLIB_TIMEOUT` when set.
+- **TUI.** It talks only to the local API, so it uses `api_url` and `timeout`.
+- **Tests.** `tests/session_fixture.py` points `config_directory()` and the legacy credentials file at a temporary
+  folder for the whole test process and removes the `ZLIB_*` settings variables, so a developer's own settings never
+  reach the suite. Subprocess tests inherit the cleaned environment.
+
 ---
 
 ## 6. Later deliverables (scope and acceptance criteria)
@@ -1177,20 +1218,20 @@ The target list is `search`, `info`, `download`, `profile`, `quota`, `doctor`, `
 ## 10. Owner decisions
 
 On 2026-11-12 the owner accepted the recommended answer to every question below. Questions 1, 2 and 7 apply to D1
-and are implemented. Questions 3 to 6, 8 and 9 belong to D2 and later deliverables; only the decision is recorded
-here.
+and are implemented. Questions 3, 4, 5 and 9 apply to D2 and are implemented. Questions 6 and 8 belong to later
+deliverables; only the decision is recorded here.
 
 | # | Question | Recommended answer | Decision (2026-11-12) |
 |---|---|---|---|
 | 1 | Change the exit codes of single commands now (1 becomes 2, 3, 4 or 5), while the version is 0.1.0? | **Yes**, in D1 with the migration note. Scripts that test `!= 0` are unaffected, and agents get usable codes | Accepted. Done in D1, with the migration table in `docs/cli-json.md` |
 | 2 | Turn prompts off automatically when stdin or stderr is not a terminal? Piped answers then need `--interactive` | **Yes.** This is the rule batch already uses, and it removes the hangs and the `< NUL` trap on Windows | Accepted. Done in D1; `--interactive` forces prompts on |
-| 3 | Put `config.toml` in `%APPDATA%` (roaming), not `%LOCALAPPDATA%` beside the session? | **Yes, `%APPDATA%`.** Settings are preferences; the session and tokens stay local. A roamed `download_dir` that is missing on another PC fails with a clear message | Accepted, for D2 |
-| 4 | Should a configured `domain` win over the saved session's domain, failing on a mismatch like `--domain` does today? | **Yes**, with the warning at `config set domain` and a mismatch message that names the source. Otherwise the setting would silently do nothing while a session exists | Accepted, for D2 |
-| 5 | Print a one-line notice when the legacy `credentials.local.toml` beside the package is used? | **Yes**, once per run. Keep the legacy path supported with no removal date: a plain-text password in site-packages deserves the nudge | Accepted, for D2 |
+| 3 | Put `config.toml` in `%APPDATA%` (roaming), not `%LOCALAPPDATA%` beside the session? | **Yes, `%APPDATA%`.** Settings are preferences; the session and tokens stay local. A roamed `download_dir` that is missing on another PC fails with a clear message | Accepted. Done in D2: `%APPDATA%\zlibrary-api\config.toml`, and a missing configured folder gives `config_invalid` naming its source |
+| 4 | Should a configured `domain` win over the saved session's domain, failing on a mismatch like `--domain` does today? | **Yes**, with the warning at `config set domain` and a mismatch message that names the source. Otherwise the setting would silently do nothing while a session exists | Accepted. Done in D2: the mismatch message names `--domain`, `ZLIB_DOMAIN`, `the config file (domain)` or `the credentials file (domain)`, and `config set domain` warns |
+| 5 | Print a one-line notice when the legacy `credentials.local.toml` beside the package is used? | **Yes**, once per run. Keep the legacy path supported with no removal date: a plain-text password in site-packages deserves the nudge | Accepted. Done in D2: once per run on stderr, also in JSON mode; the legacy path stays supported |
 | 6 | `recent`: on 2026-11-09, `/eapi/book/recently` returned only a success marker. Check it again before D5? | **Yes.** Make one read-only check on a domain you choose. If it still returns no list, drop `recent` from D5 and document `search QUERY --order date` | Accepted, before D5 |
 | 7 | Ship D1 as one PR (output contract and input policy)? | **Yes**. They share the codes and the terminal test. Section 4.12 describes a fallback split | Accepted. D1 ships as one PR |
 | 8 | Hide and deprecate `check` and `auth-test` in D3? | **Yes.** Their behavior and JSON stay. Remove them no earlier than one release after the notice | Accepted, for D3 |
-| 9 | Add a per-run way to clear configured filters, such as `--format any`? | **Not in D2.** `--no-config` and explicit flags cover it. Revisit after real use | Accepted, for D2 |
+| 9 | Add a per-run way to clear configured filters, such as `--format any`? | **Not in D2.** `--no-config` and explicit flags cover it. Revisit after real use | Accepted. Not in D2: `--no-config` and explicit `--format` or `--language` replace configured filters |
 
 ## 11. Appendices
 

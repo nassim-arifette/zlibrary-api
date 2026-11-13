@@ -26,7 +26,8 @@ from .cli_output import InputRequired
 from .cli_progress import ProgressDisplay
 from .cli_session import AccountSession
 from .cli_views import show_books
-from .credentials import DEFAULT_FILE
+from .cli_settings import named_credentials, with_configured_filters
+from .credentials import credentials_path
 from .errors import AuthenticationError, ChallengeRequired, ConnectorError
 from .search import SearchFilters
 from .terminal_text import terminal_text
@@ -357,8 +358,8 @@ def run_batch_command(args, *, client_factory, credentials_loader, prompt, passw
         raise InputRequired("Use --yes to download a list without a terminal, or --dry-run to review it first.",
                             name="ValueError")
     if args.batch_file not in (None, "-"):
-        credentials = args.credentials if args.credentials is not None else DEFAULT_FILE
-        if _same_file(Path(args.batch_file), Path(credentials)):
+        credentials = credentials_path(named_credentials(args))  # The file a sign-in would read.
+        if credentials is not None and _same_file(Path(args.batch_file), Path(credentials)):
             raise ValueError("This is the credentials file, not a list of books.")
     account = None
     if args.batch_file == "-":
@@ -371,6 +372,10 @@ def run_batch_command(args, *, client_factory, credentials_loader, prompt, passw
     items, list_path, kind = _read_items(args)
     if not items:
         raise ValueError("The list contains no items.")
+    cli_filters = filters
+    if any(item.query is not None for item in items):
+        # Configured formats and languages apply to searched items only, never to references.
+        filters = with_configured_filters(args, filters, announce=False)
     report_path = _report_path(args, list_path, kind)
     if kind is not None and report_path is None and not args.no_report and not args.dry_run:
         # With -a FILE or -a -: downloads that no report records would be repeated when the list runs again.
@@ -398,6 +403,8 @@ def run_batch_command(args, *, client_factory, credentials_loader, prompt, passw
         if account is None:
             account = AccountSession(args, credentials_loader=credentials_loader)
         account.require_input(policy, explicit=False)
+        if filters is not cli_filters:
+            with_configured_filters(args, cli_filters)  # The notice, once, before any request.
         with client_factory(account.domain, timeout=args.timeout) as client:
             account.authenticate(client, prompt=prompt, password_prompt=password_prompt)
             return command.run(client, previous)

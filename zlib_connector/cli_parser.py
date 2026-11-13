@@ -18,15 +18,18 @@ from .cli_jobs import add_jobs_parser
 from .cli_tui import add_tui_parser
 from .cli_batch import add_batch_options
 from .cli_output import UsageError, exit_codes_text
+from .cli_config import add_config_parser
 
 LIBRARY_COMMANDS = ("library", "favorites", "history", "booklists", "tags")
 DISCOVERY_COMMANDS = ("similar", "popular", "recommended")
 CATALOG_COMMANDS = ("search", "info", "formats", *DISCOVERY_COMMANDS)
 BOOKLIST_MUTATIONS = ("add", "remove", "create", "edit", "delete")
-GLOBAL_DEFAULTS = {"domain": None, "credentials": None, "timeout": 30, "session_file": None, "no_session": False,
-                   "json": False, "no_input": False, "interactive": False}
+# --timeout defaults to None so that an explicit value can be told apart; the settings fill it (default 30).
+GLOBAL_DEFAULTS = {"domain": None, "credentials": None, "timeout": None, "session_file": None, "no_session": False,
+                   "json": False, "no_input": False, "interactive": False, "config": None, "no_config": False}
 _CONFLICTS = (("no_input", "--no-input", "interactive", "--interactive"),
-              ("session_file", "--session-file", "no_session", "--no-session"))
+              ("session_file", "--session-file", "no_session", "--no-session"),
+              ("config", "--config", "no_config", "--no-config"))
 
 
 class CLIParser(argparse.ArgumentParser):
@@ -59,8 +62,13 @@ def _common_arguments(target) -> None:
     suppress = argparse.SUPPRESS
     target.add_argument("--domain", default=suppress, help="override the configured site HTTPS origin")
     target.add_argument("--credentials", type=Path, default=suppress,
-                        help="local TOML file (default: credentials.local.toml beside the package)")
-    target.add_argument("--timeout", type=float, default=suppress, help="request deadline in seconds (default: 30)")
+                        help="local TOML file (default: credentials.toml in the config folder, see config path)")
+    target.add_argument("--timeout", type=float, default=suppress,
+                        help="request deadline in seconds (default: the timeout setting, else 30)")
+    target.add_argument("--config", type=Path, default=suppress, metavar="FILE",
+                        help="settings file for this run (default: ZLIB_CONFIG, else config path)")
+    target.add_argument("--no-config", action="store_true", default=suppress,
+                        help="ignore the settings file for this run; ZLIB_* variables still apply")
     target.add_argument("--session-file", type=Path, default=suppress,
                         help="private saved session (default: state directory/session.json)")
     target.add_argument("--no-session", action="store_true", default=suppress,
@@ -144,7 +152,8 @@ def parser() -> argparse.ArgumentParser:
         if name == "download":
             add_progress_options(command)
             command.add_argument("--pick", type=int, help="1-based result number for every search; otherwise prompt")
-            command.add_argument("--output", type=Path, default=Path.cwd(), help="existing destination directory")
+            command.add_argument("--output", type=Path, help="existing destination directory (default: the"
+                                 " download_dir setting, else the current directory)")
             add_batch_options(command)
     for name in ("info", "formats"):
         command = commands.add_parser(name)
@@ -222,5 +231,6 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("domains", help="list known candidates without probing them")
     add_serve_parser(commands)
     add_mcp_parser(commands)
+    add_config_parser(commands)
     _add_common_everywhere(result)
     return result

@@ -5,6 +5,7 @@ import sys
 
 from . import cli_terminal
 from .cli_output import CommandError, InputRequired
+from .cli_settings import ensure_settings
 from .local_state import state_directory
 
 
@@ -14,7 +15,8 @@ VIEWS = ("home", "favorites", "booklists", "history", "search", "popular", "reco
 
 def add_tui_parser(commands):
     command = commands.add_parser("tui", help="browse collections, search and discover books in an interactive terminal")
-    command.add_argument("--api-url", default="http://127.0.0.1:8000/v1", help="running loopback HTTP API address")
+    command.add_argument("--api-url", help="running loopback HTTP API address (default: the api_url setting, else"
+                         " http://127.0.0.1:8000/v1)")
     command.add_argument("--token-file", type=Path, help="existing server token file (default: state directory/api-token)")
     command.add_argument("--view", choices=VIEWS, default="home",
                          help="starting page; home reads nothing and search opens the search form (default: home)")
@@ -23,6 +25,7 @@ def add_tui_parser(commands):
 
 
 def run_tui(args):
+    ensure_settings(args)
     if type(args.page_size) is not int or not 1 <= args.page_size <= 50:
         raise ValueError("Choose a TUI page size between 1 and 50.")
     if not cli_terminal.is_terminal(sys.stdin) or not cli_terminal.is_terminal(sys.stdout):

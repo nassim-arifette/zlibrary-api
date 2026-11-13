@@ -229,17 +229,49 @@ zlib-cli logout
   have private permissions but are not encrypted: keep them, and any copies, out of Git and shared
   folders.
 
-To skip typing your email, copy `credentials.example.toml` to `credentials.local.toml` in the
-project folder and fill it in. Leave `password` empty to be asked each time: a password written here
-is stored in plain text. Git ignores this file, and commands never print credentials or session
-cookies. `zlib-cli` finds the file there after `pip install -e .`; otherwise pass
-`--credentials PATH`.
+To skip typing your email, copy `credentials.example.toml` to `credentials.toml` in the settings
+folder (`zlib-cli config path` prints the settings file; the credentials file goes beside it) and
+fill it in. Leave `password` empty to be asked each time: a password written here is stored in plain
+text. Commands never print credentials or session cookies. `--credentials PATH`, `ZLIB_CREDENTIALS`
+or `zlib-cli config set credentials_file PATH` name another file. The older `credentials.local.toml`
+in the project folder still works; commands that read it print a one-line note suggesting the move.
 
 ```toml
 domain = "https://z-lib.by/"
 email = "you@example.com"
 password = ""
 ```
+
+## Save your preferences
+
+```sh
+zlib-cli config set domain https://z-lib.by/
+zlib-cli config set formats epub
+zlib-cli config set download_dir ~/Books
+zlib-cli config list --show-origin
+zlib-cli config unset formats
+```
+
+`config set` saves a setting in `config.toml`: `%APPDATA%\zlibrary-api` on Windows,
+`~/.config/zlibrary-api` elsewhere (`$XDG_CONFIG_HOME/zlibrary-api` when it is set). The keys are
+`domain`, `timeout`, `download_dir`, `languages`, `formats`, `api_url` and `credentials_file`. No
+email, password, cookie or token is ever stored there.
+
+- An option given on the command line wins, then a `ZLIB_*` variable (`ZLIB_DOMAIN`, `ZLIB_TIMEOUT`,
+  `ZLIB_DOWNLOAD_DIR`, `ZLIB_LANGUAGES`, `ZLIB_FORMATS`, `ZLIB_API_URL`, `ZLIB_CREDENTIALS`; lists are
+  comma-separated), then the file. `--no-config` ignores the file for one run, and `--config FILE`
+  (or `ZLIB_CONFIG`) uses another file.
+- Saved formats and languages filter searches only, and each search says so on stderr; `--format`
+  and `--language` replace them. They never apply to an `ID:HASH` reference and never choose a book.
+- `download_dir` is the default `--output` of `download` and `jobs file`. `serve --downloads` starts
+  the download queue there; a saved folder never starts it on its own.
+- A saved `domain` is used instead of the saved session's domain. When they differ, account commands
+  stop and say which setting chose the domain; run `zlib-cli login` there, or change the setting.
+  `doctor` still probes every known domain and says how to save the one it suggests.
+- `api_url` is where `jobs` and `tui` find the server, and where `serve` listens unless you pass
+  `--host` or `--port`. The MCP server uses the saved `domain` and `timeout` too.
+
+The [technical reference](docs/reference.md#settings) has every rule.
 
 ## Use it in scripts
 
@@ -266,7 +298,11 @@ password = ""
 - In PowerShell, check `$LASTEXITCODE`, and pass lists with `-a FILE` instead of piping them into
   `-a -`. Reading a list from standard input needs a saved session or an email in the credentials
   file.
-- Large files may need a longer `--timeout`, up to 300 seconds.
+- Large files may need a longer `--timeout`, up to 300 seconds (`zlib-cli config set timeout 120`
+  keeps it).
+- Saved settings and `ZLIB_*` variables apply to scripts too: pass `--no-config` for a run that must
+  ignore the file. A bad setting stops a command before any request with the `config_invalid` code
+  (exit 2), naming the key and where it came from.
 
 ## Local HTTP API
 
@@ -341,7 +377,7 @@ progress and cancellation, reading lists, account collections and domain checks.
 | `Use --yes ...`, `... needs a terminal` or `No saved session, and no terminal to sign in.` | Without a terminal nothing is asked: add the option the message names (`--yes`, `--pick N`), run `zlib-cli login` in a terminal first, or add `--interactive` to answer from standard input. |
 | A domain is blocked, stops responding or asks for browser verification | Run `doctor` again, then `zlib-cli --domain URL login` on a working domain. This client cannot complete browser verification. |
 | Login fails | Check the domain, email and password; `auth-test` tests them without touching the saved session. Repeated logins do not fix a blocked domain. |
-| `The saved session belongs to another domain` | Drop `--domain`, or run `login` on the new domain. |
+| `The saved session belongs to another domain` | The message names what chose the domain (`--domain`, `ZLIB_DOMAIN`, the config file or the credentials file). Drop or change it, or run `login` on the new domain. |
 | The saved session expired or is refused | Run `login` again on the same domain. A temporary network failure leaves the session intact. |
 | Another process changed the saved session | Check `status` before repeating `login` or `logout`. |
 | No downloads remaining | Check `quota` and wait until your daily limit renews. |

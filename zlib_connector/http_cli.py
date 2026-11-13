@@ -13,19 +13,39 @@ from .api_token import load_api_token
 from .local_state import state_directory
 from .cli_session import AccountSession
 from .cli_terminal import InputPolicy
+from .cli_output import UsageError
+from .cli_settings import configured_folder, ensure_settings
+from .local_api import _address
+
+
+class _DefaultHost(str):
+    """The --host default; tells a default apart from an explicit 127.0.0.1."""
+
+
+class _DefaultPort(int):
+    """The --port default; tells a default apart from an explicit 8000."""
+
+
+DEFAULT_HOST, DEFAULT_PORT = _DefaultHost("127.0.0.1"), _DefaultPort(8000)
 
 
 def add_serve_parser(commands):
     command = commands.add_parser("serve", help="serve the authenticated local HTTP API")
-    command.add_argument("--host", default="127.0.0.1", help="IPv4 loopback address or localhost (default: 127.0.0.1)")
-    command.add_argument("--port", type=int, default=8000, help="local HTTP port (default: 8000; 0 selects an available port)")
+    command.add_argument("--host", default=DEFAULT_HOST,
+                         help="IPv4 loopback address or localhost (default: the api_url setting's host, else 127.0.0.1)")
+    command.add_argument("--port", type=int, default=DEFAULT_PORT,
+                         help="local HTTP port (default: the api_url setting's port, else 8000; 0 selects an available"
+                              " port)")
     command.add_argument("--token-file", type=Path,
                          help="local bearer file; created if absent (default: state directory/api-token)")
     command.add_argument("--allow-origin", action="append", default=[], metavar="ORIGIN",
                          help="allow an explicit browser origin; repeat for several (default: none)")
     command.add_argument("--anonymous", action="store_true", help="serve without loading or sending account credentials")
-    command.add_argument("--download-dir", type=Path,
+    folders = command.add_mutually_exclusive_group()
+    folders.add_argument("--download-dir", type=Path,
                          help="enable durable download tasks in this existing directory")
+    folders.add_argument("--downloads", action="store_true",
+                         help="enable durable download tasks in the download_dir setting's folder")
     command.add_argument("--max-download-tasks", type=int, default=1000,
                          help="maximum retained tasks per account (1–10000; default: 1000)")
     return command
@@ -71,14 +91,42 @@ def _validate_listener(args):
             raise ValueError("Choose an existing download directory, not a link.")
 
 
+def _listen_address(args, settings):
+    """Without --host and --port, listen on a configured api_url (environment or config file)."""
+    host_default = isinstance(args.host, _DefaultHost)
+    port_default = isinstance(args.port, _DefaultPort)
+    if host_default and port_default and settings.origin("api_url") in ("env", "config"):
+        args.host, args.port = _address(settings.api_url)
+        return
+    args.host = str(args.host) if host_default else args.host
+    args.port = int(args.port) if port_default else args.port
+
+
+def _download_folder(args):
+    """--downloads takes the configured folder; a configured folder never enables tasks on its own."""
+    if not getattr(args, "downloads", False):
+        return
+    if getattr(args, "download_dir", None) is not None:
+        raise UsageError("argument --downloads: not allowed with argument --download-dir")
+    folder = configured_folder(args)
+    if folder is None:
+        raise ValueError("No download folder is configured. Use --download-dir DIR, or zlib-cli config set"
+                         " download_dir DIR.")
+    args.download_dir = folder
+
+
 def run_server(args, *, client_factory=Client, credentials_loader=load_credentials,
-               prompt=_prompt, password_prompt=_password_prompt, server_factory=create_server, policy=None):
+               prompt=_prompt, password_prompt=_password_prompt, server_factory=None, policy=None):
     """Bind before prompting/login; close server workers before its Client.
 
     KeyboardInterrupt deliberately propagates after cleanup so the CLI can
     return its normal interrupted status. No shutdown call is needed when
     serve_forever exits on the current thread.
     """
+    server_factory = create_server if server_factory is None else server_factory
+    settings = ensure_settings(args)
+    _listen_address(args, settings)
+    _download_folder(args)
     _validate_listener(args)
     token_path = (args.token_file or state_directory() / "api-token").expanduser().absolute()
     token = load_api_token(token_path)

@@ -22,7 +22,8 @@ from .mcp_server.tools import INSTRUCTIONS, SERVER_NAME, SERVER_TITLE, ToolSet, 
 
 DEFAULT_DOMAIN = "https://z-lib.by/"
 CLIENTS = ("claude-code", "claude-desktop", "codex")
-_ENVIRONMENT = ("ZLIB_STATE_DIR", "XDG_STATE_HOME")
+# Clients pass only a short allowlist of variables: copy the ones that change what the server resolves.
+_ENVIRONMENT = ("ZLIB_STATE_DIR", "XDG_STATE_HOME", "ZLIB_CONFIG", "XDG_CONFIG_HOME", "ZLIB_DOMAIN", "ZLIB_TIMEOUT")
 
 
 def server_version() -> str:
@@ -76,6 +77,14 @@ def _validate(args, *, probe=True):
         raise _Refused("--anonymous cannot be combined with --download-dir, --allow-account-changes or --session-file.")
     if args.no_download_confirmation and args.download_dir is None:
         raise _Refused("--no-download-confirmation requires --download-dir.")
+    from .cli_settings import ensure_settings
+    from .settings import SettingsError
+    try:
+        # The domain and timeout follow the CLI's precedence: option, ZLIB_*, config file, default.
+        # A configured download_dir never enables the download tools: --download-dir stays explicit.
+        ensure_settings(args)
+    except SettingsError as error:
+        raise _Refused(str(error)) from None
     timeout = args.timeout
     if type(timeout) not in (int, float) or not math.isfinite(timeout) or not 0 < timeout <= 300:
         raise _Refused("The request timeout must be between 0 and 300 seconds.")
@@ -107,17 +116,23 @@ def _validate(args, *, probe=True):
         saved = snapshot.session if snapshot is not None else None
         if saved is not None:
             if domain is not None and canonical_origin(domain) != saved.origin:
-                raise _Refused("The saved session belongs to another domain. Drop --domain, or run zlib-cli login "
-                               "on that domain.")
+                source = getattr(args, "domain_source", None) or "--domain"
+                raise _Refused(f"The saved session belongs to another domain than the one set by {source}. Drop it,"
+                               " or run zlib-cli login on that domain.")
             domain = domain or saved.origin
     domain = domain or DEFAULT_DOMAIN
     return domain, store, download_dir
 
 
 def _command_arguments(args, download_dir):
+    from .cli_settings import cli_domain
     argv = []
-    if args.domain is not None:
-        argv += ["--domain", args.domain]
+    if cli_domain(args) is not None:
+        argv += ["--domain", cli_domain(args)]
+    if getattr(args, "config", None) is not None:
+        argv += ["--config", str(Path(args.config).expanduser().absolute())]
+    if getattr(args, "no_config", False):
+        argv.append("--no-config")
     timeout = args.timeout
     if download_dir is not None and timeout == 30:
         timeout = 120

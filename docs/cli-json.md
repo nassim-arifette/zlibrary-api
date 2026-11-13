@@ -20,10 +20,14 @@ For everyday use, see the [user guide](../README.md); for the HTTP server, the
 - **Unknown keys.** New keys may be added to any object. Ignore the keys you do not know, as with the
   HTTP API's `/v1` contract.
 - **Global options work in any position**: `--domain`, `--credentials`, `--timeout`, `--session-file`,
-  `--no-session`, `--json`, `--no-input` and `--interactive` are accepted before the command, after it
-  and after an action (`favorites add ID:HASH --yes --json`). The last occurrence wins.
-  `--no-input` with `--interactive`, and `--session-file` with `--no-session`, are refused at any
-  position (exit 2).
+  `--no-session`, `--json`, `--no-input`, `--interactive`, `--config` and `--no-config` are accepted
+  before the command, after it and after an action (`favorites add ID:HASH --yes --json`). The last
+  occurrence wins. `--no-input` with `--interactive`, `--session-file` with `--no-session`, and
+  `--config` with `--no-config`, are refused at any position (exit 2).
+- **Settings apply to scripts.** `config.toml` and the `ZLIB_*` variables supply defaults
+  ([Settings](reference.md#settings)); pass `--no-config` to ignore the file. Notices about them
+  (configured filters, the legacy credentials file, a configured domain that differs from the saved
+  session for `status` and `logout`) are one stderr line each, also in JSON mode.
 - **`zlib-cli --version`** prints `zlib-cli X.Y.Z` (`zlib-cli unknown` when the package is not
   installed) and exits 0.
 
@@ -38,7 +42,7 @@ one JSON object, on one line, to stderr, and nothing to stdout. Usage errors are
 
 | Key | Type | Present | Meaning |
 |---|---|---|---|
-| `error` | string | always | The exception type, as printed before this contract (`ValueError`, `AuthenticationError`, ...). New values: `UsageError`, `Cancelled`, `InputRequired`, `InternalError`, `OSError`. Prefer `code` |
+| `error` | string | always | The exception type, as printed before this contract (`ValueError`, `AuthenticationError`, ...). New values: `UsageError`, `Cancelled`, `InputRequired`, `InternalError`, `OSError`, `SettingsError`. Prefer `code` |
 | `message` | string | always | A literal message. It never contains a password, email, cookie, token or upstream response body |
 | `code` | string | always | A stable snake_case code (tables below) |
 | `exit_code` | integer | always | The process exit status |
@@ -47,6 +51,7 @@ one JSON object, on one line, to stderr, and nothing to stdout. Usage errors are
 | `reason` | string | when known | The network or download cause: `dns`, `blocked_address`, `certificate`, `tls`, `timeout`, `redirect`, `http`, `network`, or a download reason (`unavailable`, `no_link`, `refused`, `format_mismatch`, `protocol`, `size_limit`, `local_write`, `invalid_book`, `save_failed`, `download`) |
 | `quota_may_be_used` | boolean | single-book `download` errors | `true` once the link request was sent: the download may have used quota |
 | `hint` | string | optional | A literal next step, in ASCII |
+| `key`, `source` | string | settings errors | The setting at fault and where it came from: `cli`, `env` or `config`. The value is never shown |
 
 Without `--json`, the first stderr line is `TypeName: message` and an optional second line starts with
 `Hint: `. A cancellation prints `Cancelled.` (or `Cancelled. Nothing was changed.`), and a local I/O
@@ -67,8 +72,8 @@ or 4) print their data on stdout and exit non-zero without an error object.
 |---|---|
 | 0 | Success, including empty results. `doctor` found a working domain. `jobs watch` saw `succeeded` |
 | 1 | Failed: a refusal, a browser challenge, a protocol change, not found, a local I/O or local API problem, an internal error. `doctor` found no working domain |
-| 2 | Usage: an invalid argument or value, `input_required`, `session_domain_mismatch` |
-| 3 | Try again later, nothing to fix: a rate limit or quota, a timeout or network failure on a read, a busy lock. A list download that only waits. `jobs watch` ended before the task finished |
+| 2 | Usage: an invalid argument or value, `input_required`, `session_domain_mismatch`, `config_invalid` |
+| 3 | Try again later, nothing to fix: a rate limit or quota, a timeout or network failure on a read, a busy lock (`config_busy`, `config_conflict` included). A list download that only waits. `jobs watch` ended before the task finished |
 | 4 | Check before trying again: an account change or a download may have taken effect (`outcome: "unknown"`), a session conflict. List items need attention. `jobs watch` ended on `failed`, `interrupted` or `cancelled` |
 | 5 | Sign-in needed: no usable session or credentials, or the session expired or was refused |
 | 130 | Cancelled: Ctrl+C, end of input at a prompt, a declined confirmation, a cancelled transfer |
@@ -86,7 +91,10 @@ The exit code follows from the error: `cancelled` gives 130; an `unknown` outcom
 | Command-line usage error | `invalid_argument` | false / not_applied | 2 | `Run: zlib-cli COMMAND --help` |
 | Invalid value found by a local check | `invalid_argument` | false / not_applied | 2 | same |
 | A prompt would be needed but input is not allowed | `input_required` | false / not_applied | 2 | |
-| Saved session for another domain | `session_domain_mismatch` | false / not_applied | 2 | `Run zlib-cli login on that domain, or use --no-session.` |
+| Saved session for another domain than the one chosen by `--domain`, `ZLIB_DOMAIN`, the config file or a named credentials file (the message names it) | `session_domain_mismatch` | false / not_applied | 2 | `Run zlib-cli login on that domain, or use --no-session.` |
+| Invalid config file, key or value (environment or file); a configured folder or credentials file that is missing | `config_invalid` | false / not_applied | 2 | `Run: zlib-cli config unset KEY` (file) or `Fix or unset ZLIB_KEY.` (environment) |
+| The config file changed while `config set` or `unset` updated it | `config_conflict` | true / not_applied | 3 | `Run: zlib-cli config list` |
+| The config file is locked by another process (5 s) | `config_busy` | true / not_applied | 3 | `Try again in a moment.` |
 | Booklist not found | `booklist_not_found` | false / not_applied | 1 | `Run: zlib-cli booklists` |
 | `download QUERY` found nothing | `not_found` | false / not_applied | 1 | |
 | Sign-in refused, session missing or expired | `upstream_authentication_required` | false / not_applied | 5 | `Run: zlib-cli login` |
@@ -100,7 +108,7 @@ The exit code follows from the error: `cancelled` gives 130; an `unknown` outcom
 | The saved session is locked by another process | `session_busy` | true / not_applied | 3 | `Try again in a moment.` |
 | Another process changed the saved session | `session_conflict` | false / not_applied | 4 | `Run: zlib-cli status` |
 | Another saved-session problem | `session_error` | false / not_applied | 1 | |
-| Local I/O failure | `local_io_error` | false / not_applied | 1 | |
+| Local I/O failure, including a config file that cannot be read or written | `local_io_error` | false / not_applied | 1 | |
 | Textual is not installed (`tui`) | `missing_dependency` | false / not_applied | 1 | `python -m pip install ".[tui]"` |
 | Ctrl+C, end of input, declined confirmation | `cancelled` | false / not_applied | 130 | |
 | Unexpected error | `internal_error` | false / not_applied | 1 | `Set ZLIB_DEBUG=1 to show details.` |
@@ -195,6 +203,28 @@ asks again after an answer that is not a number from 1 to N, and `q`, end of inp
 On `download`, `--interactive` also selects the list flow, so a piped title runs as a one-book list
 that asks for the choice and then a confirmation.
 
+## Settings
+
+A settings error names the key and its source, never the value:
+
+```json
+{"error": "SettingsError", "message": "The config file has an invalid value for timeout (C:\\Users\\me\\AppData\\Roaming\\zlibrary-api\\config.toml).", "code": "config_invalid", "exit_code": 2, "retryable": false, "outcome": "not_applied", "key": "timeout", "source": "config", "hint": "Run: zlib-cli config unset timeout"}
+```
+
+A bad value given on the command line (`--timeout 0`, `config set timeout abc`) stays
+`invalid_argument` (exit 2), with `source: "cli"`. `zlib-cli mcp` reports a settings problem as its
+usual one-line startup refusal (exit 1).
+
+`config` shapes (`--json`, fake values):
+
+| Command | stdout |
+|---|---|
+| `config path` | `{"path": "...config.toml", "exists": false, "source": "default", "credentials_path": "...credentials.toml", "credentials_exists": false}`. `source` is `cli` (`--config`), `env` (`ZLIB_CONFIG`) or `default`. `credentials_path` is the file a sign-in would read, else the default place for one |
+| `config list` | `{"path": ..., "exists": true, "settings": {"domain": {"value": null, "origin": "default"}, "timeout": {"value": 60, "origin": "config"}, "languages": {"value": ["english"], "origin": "env", "variable": "ZLIB_LANGUAGES"}, ...}}`, with all 7 keys. `origin` is `cli` (plus `option`), `env` (plus `variable`), `config` or `default`. An unset list is `[]` |
+| `config get KEY` | `{"key": "formats", "value": ["epub"], "origin": "config"}`, plus `option` or `variable` |
+| `config set KEY VALUE...` | `{"key": "formats", "value": ["epub", "pdf"], "previous": null, "path": ...}` |
+| `config unset KEY` | `{"key": "formats", "removed": true, "previous": ["epub"], "path": ...}` |
+
 ## Success shapes (`--json`, fake values)
 
 | Command | stdout |
@@ -218,6 +248,7 @@ that asks for the choice and then a confirmation.
 | `domains` | An array of strings |
 | `check` / `auth-test` (always JSON) | `{reachable, domain, api, search_ok, results, authenticated}` / `{"authenticated": true}` |
 | `jobs add`, `show`, `cancel` / `list` / `resume` / `file` / `watch` | A task `{id, reference, state, created_at, updated_at, progress, cancel_requested, error_code, file_available, error_message, outcome}` / `{tasks, total, limit, offset, paused}` / the server's resume object (`resumed` count) / `{"path": ...}` / NDJSON events `{id, task, paused}` |
+| `config path`, `list`, `get`, `set`, `unset` | See [Settings](#settings) |
 | `serve`, `shell`, `tui`, `mcp` | No data on stdout (`mcp` speaks JSON-RPC there) |
 
 ## Migration from earlier versions
@@ -234,3 +265,7 @@ that asks for the choice and then a confirmation.
 | No traceback by default | Developers | Set `ZLIB_DEBUG=1` |
 | Global options and `--json` are accepted in any position | None (only new forms) | |
 | `download --interactive` | None | It still selects the list flow and is now also accepted before the command |
+| Settings: `config.toml` and the `ZLIB_DOMAIN`, `ZLIB_TIMEOUT`, `ZLIB_DOWNLOAD_DIR`, `ZLIB_LANGUAGES`, `ZLIB_FORMATS`, `ZLIB_API_URL`, `ZLIB_CREDENTIALS` and `ZLIB_CONFIG` variables now take effect | Shells that already define one of these names for something else; machines with a config file | Unset the variable, or pass `--no-config` and explicit options. Without a file and these variables nothing changes |
+| A named credentials file without `domain` no longer forces `https://z-lib.by/` over the saved session's domain | Scripts that relied on that mismatch error | None: the session's domain is used |
+| Credentials are looked up in the settings folder first, then in the legacy `credentials.local.toml`, which prints a one-line stderr note | Tools that expect an empty stderr | Move the file to `credentials.toml` in the settings folder (`zlib-cli config path --json` shows `credentials_path`) |
+| `serve` listens on a configured `api_url` | Only when `api_url` is set in the environment or the file | Pass `--host` and `--port` to override |

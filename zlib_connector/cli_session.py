@@ -4,6 +4,17 @@ from .cli_output import CommandError, InputRequired
 from .errors import AuthenticationError
 from .session_data import canonical_origin
 from .sessions import SessionStore
+from .cli_settings import cli_domain, named_credentials, notice
+from .credentials import credentials_path, is_legacy, default_credentials_file
+
+DEFAULT_DOMAIN = "https://z-lib.by/"
+
+
+def _legacy_notice(args):
+    """Once per run, when the lookup falls back to credentials.local.toml beside the package."""
+    if is_legacy(credentials_path(None)):
+        notice(args, "Note: using credentials.local.toml beside the installed package. Move it to"
+                     f" {default_credentials_file()} (zlib-cli config path shows the folder).")
 
 
 def add_session_options(parser, commands):
@@ -36,7 +47,8 @@ class AccountSession:
         self.snapshot = None
         self.credentials = None
         if self.anonymous:
-            self.domain = args.domain or "https://z-lib.by/"
+            # The anonymous chain: --domain, ZLIB_DOMAIN, the config file's domain, the default.
+            self.domain = args.domain or DEFAULT_DOMAIN
             return
         if self.persist and args.no_session:
             raise ValueError("The login command saves a session; omit --no-session.")
@@ -45,14 +57,23 @@ class AccountSession:
             self.store = SessionStore(args.session_file)
             self.snapshot = self.store.read()
         saved = self.snapshot.session if self.snapshot is not None else None
-        if fresh or args.credentials is not None or saved is None:
-            self.credentials = credentials_loader(args.credentials)
-        configured = self.credentials.domain if self.credentials is not None else None
-        self.domain = args.domain or (configured if args.credentials is not None else None) or (
-            saved.origin if saved is not None else configured)
+        named = named_credentials(args)
+        if fresh or named is not None or saved is None:
+            if named is None:
+                _legacy_notice(args)
+            self.credentials = credentials_loader(named)
+        loaded = self.credentials
+        file_domain = loaded.domain if loaded is not None and getattr(loaded, "has_domain", True) else None
+        # Levels 1 to 4: --domain, ZLIB_DOMAIN, the config file, a named credentials file that sets domain.
+        chosen, source = args.domain, getattr(args, "domain_source", None) or "--domain"
+        if not chosen and named is not None and file_domain:
+            chosen, source = file_domain, "the credentials file (domain)"
+        # Levels 5 to 7: the saved session, the default credentials file's domain, the default.
+        self.domain = chosen or (saved.origin if saved is not None else None) or file_domain or DEFAULT_DOMAIN
         self.restore = saved is not None and not fresh
-        if self.restore and canonical_origin(self.domain) != saved.origin:
-            raise domain_mismatch("The saved session belongs to another domain. Use login or --no-session explicitly.")
+        if self.restore and chosen and canonical_origin(chosen) != saved.origin:
+            raise domain_mismatch(f"The saved session belongs to another domain than the one set by {source}. Run"
+                                  " zlib-cli login to sign in there, or use --no-session.")
 
     @property
     def needs_prompt(self) -> bool:
@@ -105,10 +126,16 @@ def local_session_command(args, *, client_factory):
         raise ValueError("This command manages saved sessions; omit --no-session.")
     store = SessionStore(args.session_file)
     snapshot = store.read()
-    if args.domain is not None:
-        origin = canonical_origin(args.domain)
+    explicit = cli_domain(args)
+    if explicit is not None:
+        origin = canonical_origin(explicit)
         if snapshot.session is not None and snapshot.session.origin != origin:
             raise domain_mismatch("The saved session belongs to another domain.")
+    elif args.domain and snapshot.session is not None and canonical_origin(args.domain) != snapshot.session.origin:
+        # Only an explicit --domain stops these local commands; a configured one gets a note.
+        notice(args, f"Note: the saved session belongs to {snapshot.session.origin}, not to the domain set by"
+                     f" {getattr(args, 'domain_source', None) or 'the settings'}. Account commands will stop with an"
+                     " error until you run zlib-cli login there.")
     if args.command == "logout":
         return store.clear(expected_generation=snapshot.generation).status()
     status = snapshot.status()
