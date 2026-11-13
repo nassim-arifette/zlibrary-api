@@ -36,6 +36,12 @@ INITIALIZE = {"jsonrpc": "2.0", "id": 1, "method": "initialize",
               "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "t", "version": "1"}}}
 
 
+def envelope(version="2026-07-28", **params):
+    meta = {"io.modelcontextprotocol/protocolVersion": version, "io.modelcontextprotocol/clientCapabilities": {},
+            "io.modelcontextprotocol/clientInfo": {"name": "modern-test", "version": "1"}}
+    return {"_meta": meta, **params}
+
+
 @isolated_sessions
 class LifecycleTests(unittest.TestCase):
     def setUp(self):
@@ -55,14 +61,22 @@ class LifecycleTests(unittest.TestCase):
             with Harness(["mcp"]) as other:
                 self.assertEqual(other.initialize(requested)["result"]["protocolVersion"], expected)
 
-    def test_p2_discover_probe_is_answered_at_once_and_initialize_still_works(self):
+    def test_p2_discover_probe_is_answered_at_once_and_opens_a_modern_connection(self):
         harness = self.harness
         started = time.monotonic()
-        response = harness.request("server/discover", {"_meta": {
-            "io.modelcontextprotocol/protocolVersion": "2026-07-28", "io.modelcontextprotocol/clientCapabilities": {}}})
-        self.assertLess(time.monotonic() - started, 0.1)
-        self.assertEqual(response["error"]["code"], -32601)
-        self.assertEqual(harness.initialize()["result"]["protocolVersion"], "2025-11-25")
+        response = harness.request("server/discover", envelope())
+        self.assertLess(time.monotonic() - started, 0.5)
+        self.assertEqual(response["result"]["supportedVersions"], ["2026-07-28"])
+        refused = harness.request("initialize", INITIALIZE["params"])["error"]
+        self.assertEqual(refused["code"], -32022)
+        self.assertEqual(refused["data"]["supported"], ["2026-07-28"])
+
+    def test_p2_an_enveloped_initialize_opens_a_legacy_connection(self):
+        harness = self.harness
+        params = {**INITIALIZE["params"], **envelope()}
+        self.assertEqual(harness.request("initialize", params)["result"]["protocolVersion"], "2025-06-18")
+        self.assertEqual(harness.request("tools/list", envelope())["error"]["code"], -32600)
+        self.assertIn("tools", harness.request("tools/list")["result"])
 
     def test_p3_methods_before_initialize_and_second_initialize(self):
         harness = self.harness
@@ -192,6 +206,75 @@ class LifecycleTests(unittest.TestCase):
         started = time.monotonic()
         self.assertEqual(harness.close(), 0)
         self.assertLess(time.monotonic() - started, 0.3)
+
+
+@isolated_sessions
+class ModernTests(unittest.TestCase):
+    """2026-07-28: no handshake, everything the server needs is in each request's _meta."""
+
+    def setUp(self):
+        self.harness = Harness(["mcp"])
+        self.addCleanup(self.harness.close)
+
+    def assert_complete(self, result):
+        self.assertEqual(result["resultType"], "complete")
+        self.assertEqual(result["_meta"]["io.modelcontextprotocol/serverInfo"]["name"], "zlib-connector")
+
+    def test_t1_discover_list_and_call_without_initialize(self):
+        harness = self.harness
+        discover = harness.request("server/discover", envelope())["result"]
+        self.assert_complete(discover)
+        self.assertEqual(discover["capabilities"], {"tools": {}})
+        self.assertEqual((discover["ttlMs"], discover["cacheScope"]), (300000, "private"))
+        self.assertLessEqual(len(discover["instructions"]), 512)
+        listed = harness.request("tools/list", envelope())["result"]
+        self.assert_complete(listed)
+        self.assertEqual((listed["ttlMs"], listed["cacheScope"]), (300000, "private"))
+        with Harness(["mcp"]) as legacy:
+            legacy.initialize()
+            self.assertEqual(listed["tools"], legacy.request("tools/list")["result"]["tools"])
+        called = harness.request("tools/call", envelope(name="server_status", arguments={}))["result"]
+        self.assert_complete(called)
+        self.assertFalse(called.get("isError", False))
+        self.assertEqual(called["structuredContent"]["protocol_version"], "2026-07-28")
+        self.assertIn("client modern-test, protocol 2026-07-28", harness.stderr.getvalue())
+
+    def test_t2_envelope_errors(self):
+        harness = self.harness
+        unsupported = harness.request("server/discover", envelope("1900-01-01"))["error"]
+        self.assertEqual(unsupported["code"], -32022)
+        self.assertEqual(unsupported["data"], {"supported": ["2026-07-28"], "requested": "1900-01-01"})
+        missing = envelope()
+        del missing["_meta"]["io.modelcontextprotocol/clientCapabilities"]
+        self.assertEqual(harness.request("tools/list", missing)["error"]["code"], -32602)
+        self.assertEqual(harness.request("tools/list")["error"]["code"], -32602)
+        self.assertEqual(harness.request("tools/list", envelope(cursor="x"))["error"]["code"], -32602)
+
+    def test_t3_removed_and_unknown_methods(self):
+        harness = self.harness
+        for method in ("ping", "logging/setLevel", "resources/list", "prompts/list"):
+            self.assertEqual(harness.request(method, envelope())["error"]["code"], -32601)
+        self.assertEqual(harness.request("tools/call", envelope(name="nope", arguments={}))["error"]["code"], -32602)
+
+    def test_t4_listen_is_acknowledged_held_and_ended_by_cancellation(self):
+        harness = self.harness
+        harness.send({"jsonrpc": "2.0", "id": "listen-1", "method": "subscriptions/listen",
+                      "params": envelope(notifications={"toolsListChanged": True})})
+        acknowledged = harness.receive()
+        self.assertEqual(acknowledged, {"jsonrpc": "2.0", "method": "notifications/subscriptions/acknowledged",
+                                        "params": {"_meta": {"io.modelcontextprotocol/subscriptionId": "listen-1"},
+                                                   "notifications": {}}})
+        harness.quiet()
+        harness.send({"jsonrpc": "2.0", "id": "listen-1", "method": "subscriptions/listen",
+                      "params": envelope(notifications={})})
+        self.assertEqual(harness.receive(), {"jsonrpc": "2.0", "error": {"code": -32600, "message": "Invalid request"}})
+        self.assert_complete(harness.request("tools/list", envelope())["result"])
+        harness.send({"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": "listen-1"}})
+        harness.quiet()
+        self.assertEqual(harness.request("subscriptions/listen", envelope())["error"]["code"], -32602)
+        harness.send({"jsonrpc": "2.0", "id": "listen-1", "method": "subscriptions/listen",
+                      "params": envelope(notifications={})})
+        self.assertEqual(harness.receive()["method"], "notifications/subscriptions/acknowledged")
 
 
 class CodecTests(unittest.TestCase):

@@ -80,7 +80,8 @@ claude mcp get zlib    # status; /mcp inside a session
 - Downloads and account changes carry `anthropic/requiresUserInteraction`: Claude Code asks you on **every**
   call, even in auto or bypass mode, with no "don't ask again". `--no-download-confirmation` removes that prompt
   from `download_book` and `resume_downloads` only.
-- `MCP_PROTOCOL_NEGOTIATION=legacy` is not needed.
+- Claude Code's default runtime speaks 2026-07-28 with this server; `MCP_PROTOCOL_NEGOTIATION=legacy` makes it use
+  `initialize` instead. Both work.
 
 ### Claude Desktop
 
@@ -224,8 +225,12 @@ is not retried. Queued tasks wait and start the next time a download tool is use
 
 ## Protocol notes
 
-- Revisions `2025-11-25` and `2025-06-18`, through `initialize`. Other methods, including the newer
-  `server/discover` probe, get `-32601` at once, so clients fall back to `initialize`.
+- Revision `2026-07-28` (stateless: `server/discover`, a version in every request's `_meta`, `resultType` on every
+  result), and the legacy revisions `2025-11-25` and `2025-06-18` through `initialize`. The client's first request
+  picks one for the whole process: `initialize` on a 2026-07-28 connection gets `-32022`, and a 2026-07-28 request
+  on a legacy connection gets `-32600`.
+- On 2026-07-28, `ping` and `logging/setLevel` are gone (`-32601`). `subscriptions/listen` is acknowledged with an
+  empty filter, since the tool list never changes, and stays open until it is cancelled.
 - Only tools are declared: no resources, prompts, sampling or MCP logging. Logs go to stderr only.
 - `notifications/cancelled` stops waits and lock waits; a request that was cancelled gets no response. Cancelling
   `get_download` stops only the wait, never the download; use `cancel_download`. A change already sent to

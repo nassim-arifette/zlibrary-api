@@ -1,4 +1,4 @@
-"""MCP server over stdio (legacy revisions 2025-11-25 and 2025-06-18), standard library only.
+"""MCP server over stdio (2026-07-28, and legacy 2025-11-25 and 2025-06-18), standard library only.
 
 Start it with ``zlib-cli mcp``; see docs/mcp.md. ``serve_stdio`` serves an
 already-built tool set on two binary streams, or on the diverted process

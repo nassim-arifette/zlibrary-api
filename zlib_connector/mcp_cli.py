@@ -16,7 +16,7 @@ import threading
 
 from .eapi import Client
 from .mcp_server.backend import Backend
-from .mcp_server.protocol import McpServer, ShutdownRequested, SUPPORTED_VERSIONS, divert_stdio
+from .mcp_server.protocol import MODERN_VERSIONS, McpServer, ShutdownRequested, SUPPORTED_VERSIONS, divert_stdio
 from .mcp_server.tools import INSTRUCTIONS, SERVER_NAME, SERVER_TITLE, ToolSet, select_tools
 
 
@@ -250,7 +250,7 @@ def run_mcp(args, *, client_factory=Client, stdin=None, stdout=None, stderr=None
             previous = signal.signal(signal.SIGTERM, stop)
         groups = ["read"] + (["downloads"] if download_dir is not None else []) + (
             ["account changes"] if args.allow_account_changes else [])
-        logger.info("%s %s, protocol %s, tools: %s (%d)%s", SERVER_NAME, version, " and ".join(SUPPORTED_VERSIONS),
+        logger.info("%s %s, protocol %s, tools: %s (%d)%s", SERVER_NAME, version, ", ".join(MODERN_VERSIONS + SUPPORTED_VERSIONS),
                     ", ".join(groups), len(tools.tools), ", anonymous" if args.anonymous else "")
         try:
             interactive = stdin.isatty()

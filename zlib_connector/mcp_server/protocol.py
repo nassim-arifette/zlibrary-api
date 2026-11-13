@@ -1,4 +1,8 @@
-"""Transport-agnostic MCP (legacy revisions) over two byte streams: one JSON-RPC message per line.
+"""Transport-agnostic MCP over two byte streams: one JSON-RPC message per line.
+
+The first request picks the era of the connection. ``initialize`` opens a legacy
+one (2025-11-25 or 2025-06-18). Any other request whose ``_meta`` names a
+protocol version opens a modern, stateless one (2026-07-28).
 
 The dispatcher answers lifecycle methods inline, runs tool calls on daemon
 threads and never sends anything for a request after its cancellation. stdout
@@ -17,6 +21,13 @@ from ..terminal_text import terminal_text
 
 SUPPORTED_VERSIONS = ("2025-11-25", "2025-06-18")
 LATEST_VERSION = SUPPORTED_VERSIONS[0]
+MODERN_VERSIONS = ("2026-07-28",)
+VERSION_KEY = "io.modelcontextprotocol/protocolVersion"
+CAPABILITIES_KEY = "io.modelcontextprotocol/clientCapabilities"
+CLIENT_INFO_KEY = "io.modelcontextprotocol/clientInfo"
+SERVER_INFO_KEY = "io.modelcontextprotocol/serverInfo"
+SUBSCRIPTION_KEY = "io.modelcontextprotocol/subscriptionId"
+CACHE_TTL_MS = 300000
 MAX_LINE = 4 * 1024 * 1024
 MAX_CONCURRENT = 4
 
@@ -25,6 +36,7 @@ INVALID_REQUEST = -32600
 METHOD_NOT_FOUND = -32601
 INVALID_PARAMS = -32602
 INTERNAL_ERROR = -32603
+UNSUPPORTED_VERSION = -32022
 
 _MESSAGES = {
     PARSE_ERROR: "Parse error",
@@ -32,8 +44,10 @@ _MESSAGES = {
     METHOD_NOT_FOUND: "Method not found",
     INVALID_PARAMS: "Invalid params",
     INTERNAL_ERROR: "Internal error",
+    UNSUPPORTED_VERSION: "Unsupported protocol version",
 }
 _KNOWN = frozenset(("initialize", "ping", "tools/list", "tools/call"))
+_MODERN = frozenset(("server/discover", "tools/list", "tools/call", "subscriptions/listen"))
 
 
 class _Invalid(Exception):
@@ -151,6 +165,8 @@ class McpServer:
         self._write_lock = threading.Lock()
         self._registry = threading.Lock()
         self._inflight = {}
+        self._listens = set()
+        self.era = None
         self._writer = None
         self._closing = threading.Event()
         self.protocol_version = None
@@ -189,6 +205,18 @@ class McpServer:
 
     def _result(self, request_id, result):
         self._send({"jsonrpc": "2.0", "id": request_id, "result": result})
+
+    def _complete(self, result):
+        """A modern result: resultType and the server's identity in _meta."""
+        meta = dict(result.get("_meta") or {})
+        meta[SERVER_INFO_KEY] = self._server_info
+        return {**result, "resultType": "complete", "_meta": meta}
+
+    def _unsupported(self, request_id, requested):
+        self._send({"jsonrpc": "2.0", "id": request_id, "error": {
+            "code": UNSUPPORTED_VERSION, "message": _MESSAGES[UNSUPPORTED_VERSION],
+            "data": {"supported": list(MODERN_VERSIONS), "requested": requested}}})
+        self._log.warning("protocol error %d", UNSUPPORTED_VERSION)
 
     def _notify_progress(self, key, message) -> bool:
         with self._registry:
@@ -279,6 +307,20 @@ class McpServer:
         if params is None or not isinstance(params, dict):
             self._error(INVALID_REQUEST, request_id, method=method)
             return
+        meta = params.get("_meta")
+        enveloped = isinstance(meta, dict) and VERSION_KEY in meta
+        if method == "initialize" and self.era == "modern":
+            self._unsupported(request_id, params.get("protocolVersion") if isinstance(
+                params.get("protocolVersion"), str) else "")
+            return
+        if self.era is None and enveloped and method != "initialize":
+            self.era = "modern"
+        if self.era == "modern":
+            self._modern(request_id, method, params)
+            return
+        if enveloped and self.era == "legacy":
+            self._error(INVALID_REQUEST, request_id, method=method)
+            return
         if method not in _KNOWN:
             self._error(METHOD_NOT_FOUND, request_id, method=method)
             return
@@ -299,6 +341,58 @@ class McpServer:
             return
         self._call(request_id, params)
 
+    def _modern(self, request_id, method, params):
+        """One stateless 2026-07-28 request: everything it needs is in its own _meta."""
+        meta = params.get("_meta")
+        if (not isinstance(meta, dict) or not isinstance(meta.get(VERSION_KEY), str)
+                or not isinstance(meta.get(CAPABILITIES_KEY), dict)):
+            self._error(INVALID_PARAMS, request_id, method=method)
+            return
+        version = meta[VERSION_KEY]
+        if version not in MODERN_VERSIONS:
+            self._unsupported(request_id, version)
+            return
+        if self.client_name is None:
+            client = meta.get(CLIENT_INFO_KEY)
+            name = client.get("name") if isinstance(client, dict) else None
+            self.client_name = terminal_text(name)[:64] if isinstance(name, str) else "(unnamed)"
+            self._log.info("client %s, protocol %s", self.client_name, version)
+        if method not in _MODERN:
+            self._error(METHOD_NOT_FOUND, request_id, method=method)
+            return
+        if method == "server/discover":
+            result = {"supportedVersions": list(MODERN_VERSIONS), "capabilities": {"tools": {}},
+                      "ttlMs": CACHE_TTL_MS, "cacheScope": "private"}
+            if self._instructions:
+                result["instructions"] = self._instructions
+            self._result(request_id, self._complete(result))
+        elif method == "tools/list":
+            if params.get("cursor") is not None:
+                self._error(INVALID_PARAMS, request_id, method=method)
+                return
+            self._result(request_id, self._complete({"tools": self._tools.list_tools(), "ttlMs": CACHE_TTL_MS,
+                                                     "cacheScope": "private"}))
+        elif method == "subscriptions/listen":
+            self._listen(request_id, params)
+        else:
+            self._call(request_id, params, protocol_version=version)
+
+    def _listen(self, request_id, params):
+        """Acknowledge with an empty filter: the tool list never changes, so nothing is ever sent on it."""
+        if not isinstance(params.get("notifications"), dict):
+            self._error(INVALID_PARAMS, request_id, method="subscriptions/listen")
+            return
+        key = _id_key(request_id)
+        with self._registry:
+            duplicate = key in self._inflight or key in self._listens
+            if not duplicate:
+                self._listens.add(key)
+        if duplicate:
+            self._error(INVALID_REQUEST, method="subscriptions/listen")
+            return
+        self._send({"jsonrpc": "2.0", "method": "notifications/subscriptions/acknowledged",
+                    "params": {"_meta": {SUBSCRIPTION_KEY: request_id}, "notifications": {}}})
+
     def _notification(self, message):
         method = message.get("method")
         params = message.get("params")
@@ -309,6 +403,7 @@ class McpServer:
             if not _valid_id(request_id):
                 return
             with self._registry:
+                self._listens.discard(_id_key(request_id))
                 entry = self._inflight.get(_id_key(request_id))
                 if entry is not None and entry.state == "running":
                     entry.state = "cancelled"
@@ -328,6 +423,7 @@ class McpServer:
             return
         version = requested if requested in SUPPORTED_VERSIONS else LATEST_VERSION
         self.protocol_version = version
+        self.era = "legacy"
         name = client.get("name")
         self.client_name = terminal_text(name)[:64] if isinstance(name, str) else None
         result = {"protocolVersion": version, "capabilities": {"tools": {"listChanged": False}},
@@ -337,7 +433,7 @@ class McpServer:
         self._result(request_id, result)
         self._log.info("client %s, protocol %s", self.client_name or "(unnamed)", version)
 
-    def _call(self, request_id, params):
+    def _call(self, request_id, params, *, protocol_version=None):
         name = params.get("name")
         arguments = params.get("arguments", {})
         meta = params.get("_meta", {})
@@ -353,29 +449,32 @@ class McpServer:
         if not _valid_id(token):
             token = None
         key = _id_key(request_id)
+        modern = protocol_version is not None
+        protocol_version = protocol_version or self.protocol_version
         with self._registry:
-            if key in self._inflight:
+            if key in self._inflight or key in self._listens:
                 duplicate = True
             else:
                 duplicate = False
                 running = sum(1 for entry in self._inflight.values() if entry.state == "running")
                 busy = running >= self._max_concurrent
                 if not busy:
-                    context = RequestContext(self, key, token, self.protocol_version)
+                    context = RequestContext(self, key, token, protocol_version)
                     entry = _Entry(request_id, context, name)
                     self._inflight[key] = entry
         if duplicate:
             self._error(INVALID_REQUEST, method="tools/call")
             return
         if busy:
-            self._result(request_id, self._tools.busy_result())
+            busy_result = self._tools.busy_result()
+            self._result(request_id, self._complete(busy_result) if modern else busy_result)
             self._log.info("tool %s: server_busy", name)
             return
-        worker = threading.Thread(target=self._run, args=(entry, key, name, arguments),
+        worker = threading.Thread(target=self._run, args=(entry, key, name, arguments, modern),
                                   name="zlib-mcp-call", daemon=True)
         worker.start()
 
-    def _run(self, entry, key, name, arguments):
+    def _run(self, entry, key, name, arguments, modern=False):
         outcome = None
         try:
             result = self._tools.call(name, arguments, entry.context)
@@ -397,7 +496,7 @@ class McpServer:
             code = "ok"
             if result.get("isError"):
                 code = getattr(self._tools, "error_code", lambda value: "error")(result)
-            self._result(entry.request_id, result)
+            self._result(entry.request_id, self._complete(result) if modern else result)
             self._log.info("tool %s: %s (%d ms)", name, code, elapsed)
         else:
             self._send({"jsonrpc": "2.0", "id": entry.request_id,

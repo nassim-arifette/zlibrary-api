@@ -1,7 +1,7 @@
 # MCP server for zlib-connector: implementation spec
 
 Design draft, 2026-11-11; owner decisions recorded 2026-11-12 (section 18). Implemented 2026-11-12
-(delivery steps 1 to 5 of section 17, Tier A); Tier B (section 19) is not implemented yet. User guide: `docs/mcp.md`.
+(delivery steps 1 to 5 of section 17, Tier A); Tier B (section 19) is implemented too. User guide: `docs/mcp.md`.
 
 Base: `main` at 29ee46b, package version 0.1.0, Python >= 3.11, `dependencies = []`. Paths are relative to
 the repository root and line numbers refer to that commit. This document is self-contained: section 2 restates the
@@ -18,7 +18,7 @@ clearly distinguished".
 |---|---|
 | Transport | stdio only. No port, no HTTP transport, no OAuth. |
 | Implementation | Standard library only, in a new package `zlib_connector/mcp_server/`. The official `mcp` SDK is not used, not even as an optional extra. |
-| Protocol | Tier A first: legacy revisions `2025-11-25` and `2025-06-18` through `initialize`. Unknown methods, including the modern probe `server/discover`, get `-32601` at once. Tier B (dual-era `2026-07-28`) is a later PR. |
+| Protocol | Tier A: legacy revisions `2025-11-25` and `2025-06-18` through `initialize`. Tier B: `2026-07-28`, chosen when the first request is not `initialize` and carries the `_meta` envelope (section 19). |
 | Architecture | An in-process adapter over `eapi.Client`, next to the CLI and the HTTP API. It reuses the HTTP contract validators and error mapping, and one lock serializes the account Client. |
 | Start | `zlib-cli mcp` (same as `python -m zlib_connector mcp`), registered in the client as a stdio command. |
 | Default | Read-only tools only. |
@@ -837,7 +837,7 @@ active transfer:
 |---|---|
 | `-32700` | invalid JSON or UTF-8, `NaN`/`Infinity`, duplicate keys, nesting too deep (no `id`) |
 | `-32600` | not an object (including arrays); `jsonrpc` other than `"2.0"`; id that is `null`, `bool` or a float; `method` not a string; `params` not an object; oversized line (no `id`); known method before `initialize`; second `initialize`; duplicate in-flight id (no `id`) |
-| `-32601` | every other method, including `server/discover`, `resources/*`, `prompts/*`, `completion/*` and `logging/setLevel` |
+| `-32601` | every other method, including `resources/*`, `prompts/*`, `completion/*` and `logging/setLevel`; on a legacy connection also `server/discover` without the envelope |
 | `-32602` | malformed `tools/call` params (`name` not a string, `arguments` or `_meta` not an object); unknown or disabled tool ("Unknown or disabled tool."); bad `initialize` params; a `tools/list` cursor (there is only one page) |
 | `-32603` | a fault in the dispatcher or serializer only, with a generic message; the exception class goes to stderr |
 
@@ -1197,7 +1197,7 @@ CLI (C):
 | 3 | `Add read-only MCP server` | `mcp_cli.py` (parser, validation, `--anonymous`, `--print-config`), `backend.py` (session, lock, public client), `tools.py` with the 13 read tools, `cli.py` and `cli_parser.py` wiring, `docs/mcp.md` (read-only), README section. Tests T1-T11 (read parts), C1-C4. | ~600 + tests + docs |
 | 4 | `Add MCP download tools` | `--download-dir`, the 5 download tools, pre-checks, keys, waits and progress, shutdown close. Docs update. Tests D1-D9. | ~350 + tests |
 | 5 | `Add MCP account changes` | `--allow-account-changes`, the 9 tools, the delete guard. Docs update. Tests T4, T5 and T10 (mutation parts). | ~250 + tests |
-| 6 (later) | `Serve MCP 2026-07-28 requests` | Tier B (section 19). | ~250 + tests |
+| 6 | `Serve MCP 2026-07-28 requests` | Tier B (section 19). | ~250 + tests |
 
 Later, only if needed: `--api-url` delegation to a running `zlib-cli serve` (shared queue, downloads that outlive
 the client), elicitation-based confirmation, a batch planning tool, a per-download deadline in the library.
@@ -1221,7 +1221,11 @@ The owner accepted every recommendation, with one addition to the first:
 
 ---
 
-## 19. Tier B notes (2026-07-28, later PR)
+## 19. Tier B (2026-07-28, implemented)
+
+Checked with real clients (2026-11-13): Claude Code 2.1.323 probes `server/discover`, gets the result below and then
+sends `tools/list` with the envelope, never `initialize`; the official Python SDK 2.3.0 (`ClientSession.discover()`)
+lists and calls tools on this era, and its `initialize()` still gets the legacy era.
 
 - **Era selection** from the client's first request. A request that is not `initialize` and carries the envelope
   opens a modern connection; anything else, including an `initialize` that carries the envelope, opens a legacy

@@ -430,7 +430,7 @@ Version 0.1.0: everything described above works today. Planned, without dates:
   updates (today it searches and browses).
 - The website's full My Library page, browsable and searchable by tag.
 - HTTP login and logout, a live feed for the whole download queue, resuming partial downloads.
-- In the MCP server: the stateless 2026-07-28 protocol revision, and downloads that outlive the assistant by
+- In the MCP server: downloads that outlive the assistant by
   sharing a running `zlib-cli serve` queue.
 - Uploads, once Z-Library's upload flow has been checked.
 
