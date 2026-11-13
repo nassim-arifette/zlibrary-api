@@ -252,13 +252,19 @@ class HelpScreen(ModalScreen):
 
     def on_resize(self) -> None:
         # Title, close hint, their margins and the box padding take 6 rows.
-        self.query_one("#help-scroll").styles.max_height = max(3, self.app.size.height - 6)
+        self.query_one("#help-scroll").styles.max_height = self._room()
         self.call_after_refresh(self._fit)
+        # A slow terminal may lay the box out after that refresh; check once more when it has.
+        self.set_timer(.2, self._fit)
+
+    def _room(self) -> int:
+        return max(3, self.app.size.height - 6)
 
     def _fit(self) -> None:
         if not self.is_attached:
             return
-        scrolls = self.query_one("#help-scroll").max_scroll_y > 0
+        # The text's height depends only on the box width, not on when the new height is laid out.
+        scrolls = self.query_one("#help-scroll").virtual_size.height > self._room()
         if scrolls != self._scrolls:
             self._scrolls = scrolls
             self.query_one("#help-close", Static).update(hint_line(self.hints, 80))
