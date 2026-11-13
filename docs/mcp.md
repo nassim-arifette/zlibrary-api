@@ -50,7 +50,7 @@ zlib-cli --timeout 120 mcp --download-dir /path/to/Books --print-config claude-c
 **State directory.** Clients pass only a few environment variables to the server. If you set `ZLIB_STATE_DIR`
 (or `XDG_STATE_HOME` on Linux), pass it through the client's `env` setting, or use `--session-file`; otherwise
 the server does not find the session saved by `zlib-cli login` and `server_status` shows the session state
-`empty`. The same holds for `ZLIB_CONFIG`, `XDG_CONFIG_HOME`, `ZLIB_DOMAIN` and `ZLIB_TIMEOUT`; the default
+`empty`. The same holds for `ZLIB_CONFIG`, `XDG_CONFIG_HOME`, `ZLIB_DOMAIN`, `ZLIB_TIMEOUT` and `ZLIB_PROXY`; the default
 settings file needs only `APPDATA` (Windows) or `HOME`, which clients pass. `--print-config` copies these
 variables when they are set.
 

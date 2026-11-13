@@ -145,6 +145,12 @@ class McpCliTests(unittest.TestCase):
         self.assertEqual(read_only["args"][-1], "mcp")
         self.assertEqual(read_only["args"][read_only["args"].index("--timeout") + 1], "30")
 
+    def test_c2_print_config_keeps_the_proxy_from_the_environment(self):
+        with patch.dict(os.environ, {"ZLIB_PROXY": "http://127.0.0.1:3128"}):
+            codex = tomllib.loads(self.print_config("codex"))["mcp_servers"]["zlib"]
+        self.assertEqual(codex["env"]["ZLIB_PROXY"], "http://127.0.0.1:3128")
+        self.assertNotIn("--proxy", codex["args"])
+
     def test_c3_help_lists_flags_and_says_actions_are_off(self):
         out = io.StringIO()
         with contextlib.redirect_stdout(out), self.assertRaises(SystemExit):

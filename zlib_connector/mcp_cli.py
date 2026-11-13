@@ -23,7 +23,8 @@ from .mcp_server.tools import INSTRUCTIONS, SERVER_NAME, SERVER_TITLE, ToolSet, 
 DEFAULT_DOMAIN = "https://z-lib.by/"
 CLIENTS = ("claude-code", "claude-desktop", "codex")
 # Clients pass only a short allowlist of variables: copy the ones that change what the server resolves.
-_ENVIRONMENT = ("ZLIB_STATE_DIR", "XDG_STATE_HOME", "ZLIB_CONFIG", "XDG_CONFIG_HOME", "ZLIB_DOMAIN", "ZLIB_TIMEOUT")
+_ENVIRONMENT = ("ZLIB_STATE_DIR", "XDG_STATE_HOME", "ZLIB_CONFIG", "XDG_CONFIG_HOME", "ZLIB_DOMAIN", "ZLIB_TIMEOUT",
+                "ZLIB_PROXY")
 
 
 def server_version() -> str:

@@ -176,7 +176,7 @@ ignores the file only.
 - **MCP.** `zlib-cli mcp` resolves `domain` and `timeout` the same way. It never reads
   credentials, and `--download-dir` stays its only way to enable downloads. A bad
   setting is a one-line startup refusal (exit 1). `--print-config` copies `ZLIB_CONFIG`,
-  `XDG_CONFIG_HOME`, `ZLIB_DOMAIN` and `ZLIB_TIMEOUT` when they are set, because MCP
+  `XDG_CONFIG_HOME`, `ZLIB_DOMAIN`, `ZLIB_TIMEOUT` and `ZLIB_PROXY` when they are set, because MCP
   clients pass few variables; the default location needs only `APPDATA` or `HOME`.
 
 ### Domain selection
