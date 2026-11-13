@@ -6,6 +6,7 @@ from pathlib import Path
 import socket
 import tempfile
 import threading
+import time
 import unittest
 from unittest.mock import patch
 
@@ -134,6 +135,32 @@ class ConnectTests(unittest.TestCase):
                 patch("http.client.HTTPSConnection", side_effect=connection), self.assertRaises(NetworkError):
             Transport(5, proxy="http://127.0.0.1:3128").request("https://books.example/eapi/file")
         self.assertEqual(1, len(made))
+
+    def test_a_proxy_trickling_its_connect_reply_is_held_to_the_request_deadline(self):
+        server = socket.create_server(("127.0.0.1", 0))
+        self.addCleanup(server.close)
+        stop = threading.Event()
+        self.addCleanup(stop.set)
+
+        def trickle():
+            connection, _ = server.accept()
+            with connection:
+                request = b""
+                while b"\r\n\r\n" not in request:
+                    request += connection.recv(4096)
+                try:
+                    connection.sendall(b"HTTP/1.1 200 Connection established\r\n")
+                    while not stop.wait(0.1):
+                        connection.sendall(b"X-Slow: 1\r\n")  # Each line comes well within the socket timeout.
+                except OSError:
+                    pass
+
+        threading.Thread(target=trickle, daemon=True).start()
+        started = time.monotonic()
+        with self.assertRaises(NetworkError) as caught:
+            Transport(0.5, proxy=f"http://127.0.0.1:{server.getsockname()[1]}").request("https://books.example/")
+        self.assertLess(time.monotonic() - started, 3)
+        self.assertEqual("timeout", caught.exception.reason)
 
     def test_only_https_site_urls_go_through_the_proxy(self):
         with self.assertRaises(NetworkError):

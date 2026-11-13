@@ -337,6 +337,8 @@ class Transport:
                 host, port, timeout=remaining, context=ssl.create_default_context()), cancel=cancel, deadline=deadline)
             if self.proxy is not None:
                 connection.set_tunnel(parsed.hostname, 443)
+            # A proxy can trickle its CONNECT reply, so the tunnel handshake is held to the deadline too.
+            handshake_guards = []
             # TLS still checks the site's hostname; the socket uses validated DNS answers.
             def connect(_address, timeout=remaining, source_address=None):
                 last_error = OSError("No reachable public address")
@@ -350,6 +352,10 @@ class Transport:
                     else:
                         try:
                             sock.settimeout(_remaining(deadline, cancel))
+                            if self.proxy is not None:
+                                handshake_guard = _ReadDeadline(sock, deadline, cancel)
+                                handshake_guards.append(handshake_guard)
+                                handshake_guard.start()
                         except BaseException:
                             sock.close()
                             raise
@@ -376,7 +382,11 @@ class Transport:
                 if parsed.query:
                     path += "?" + parsed.query
                 _refresh_timeout(connection, deadline, cancel)
-                _network_call(lambda: connection.request(method, path, payload, dict(request.header_items())), cancel=cancel, deadline=deadline)
+                try:
+                    _network_call(lambda: connection.request(method, path, payload, dict(request.header_items())), cancel=cancel, deadline=deadline)
+                finally:
+                    for handshake_guard in handshake_guards:
+                        handshake_guard.close()
                 _refresh_timeout(connection, deadline, cancel)
                 # getresponse() can detach a Connection: close socket while its
                 # response file still owns it. Retain it for per-read deadlines.
