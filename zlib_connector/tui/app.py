@@ -522,8 +522,10 @@ class CollectionsApp(App):
             row.query_one(".detail-value", Static).update(values.get(label, ""))
         self.query_one("#detail-description", Static).update(
             detail_description(book) or Content.styled(NO_DESCRIPTION, "$foreground-muted"))
-        # Whether the page scrolls, and so whether the hints offer ↑↓, is known once it is laid out.
+        # Whether the page scrolls, and so whether the hints offer ↑↓, is known once it is laid out; a slow
+        # terminal may lay it out after the next refresh, so check once more a little later.
         self.call_after_refresh(self._show_hints)
+        self.set_timer(.2, self._show_hints)
         return None if self._loading else self.query_one("#detail-view")
 
     @staticmethod
