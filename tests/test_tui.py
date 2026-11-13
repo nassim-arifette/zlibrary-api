@@ -101,7 +101,8 @@ def text(app, selector):
 
 class TUITestCase(unittest.IsolatedAsyncioTestCase):
     async def until(self, pilot, condition, message="The synthetic view did not update."):
-        for _ in range(300):
+        deadline = time.monotonic() + 10  # Slow Windows runners can take several seconds to repaint.
+        while time.monotonic() < deadline:
             await pilot.pause(.01)
             if condition():
                 return
