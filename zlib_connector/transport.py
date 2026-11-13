@@ -46,6 +46,36 @@ def validate_url(url: str) -> None:
     if not valid:
         raise NetworkError("Use an HTTPS URL without embedded credentials or a custom port.")
 
+def validate_proxy(url: str) -> str:
+    """The canonical ``http://HOST:PORT`` of an explicit HTTPS proxy; ValueError for anything else."""
+    try:
+        parsed = urlsplit(url)
+        port = parsed.port
+    except (ValueError, TypeError, AttributeError):
+        port = parsed = None
+    if (parsed is None or parsed.scheme != "http" or not parsed.hostname or port is None or not 0 < port < 65536
+            or "@" in parsed.netloc or parsed.path not in ("", "/") or parsed.query or parsed.fragment
+            or not url.isprintable()):
+        raise ValueError("Use an HTTP proxy as http://HOST:PORT, without credentials or a path.")
+    host = parsed.hostname
+    return f"http://[{host}]:{port}" if ":" in host else f"http://{host}:{port}"
+
+
+def proxy_addresses(host: str) -> list[str]:
+    """The proxy's addresses. Loopback and LAN proxies are allowed: the proxy was configured explicitly."""
+    try:
+        addresses = list(dict.fromkeys(item[4][0] for item in socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)))
+    except OSError:
+        raise NetworkError("The proxy's name could not be resolved. Check the proxy setting.", reason="proxy") from None
+    if not addresses:
+        raise NetworkError("The proxy has no reachable addresses.", reason="proxy")
+    for address in addresses:
+        ip = ipaddress.ip_address(address.split("%", 1)[0])
+        if ip.is_unspecified or ip.is_multicast:
+            raise NetworkError("The proxy address is not usable.", reason="proxy")
+    return addresses
+
+
 def public_addresses(host: str) -> list[str]:
     try:
         addresses = list(dict.fromkeys(item[4][0] for item in socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)))
@@ -114,7 +144,14 @@ def _network_call(operation, *, cancel=None, deadline=None):
     except TimeoutError:
         check_state()
         raise NetworkError("The request timed out.", reason="timeout") from None
-    except (OSError, http.client.HTTPException, ValueError):
+    except OSError as error:
+        check_state()
+        # http.client reports a refused CONNECT this way; the proxy's own text is not shown.
+        refused = re.match(r"Tunnel connection failed: ([0-9]{3})", str(error))
+        if refused:
+            raise NetworkError(f"The proxy refused the HTTPS tunnel (HTTP {refused.group(1)}).", reason="proxy") from None
+        raise NetworkError("Network or TLS request failed. Check the domain and your connection.") from None
+    except (http.client.HTTPException, http.client.HTTPException, ValueError):
         check_state()
         raise NetworkError("Network or TLS request failed. Check the domain and your connection.") from None
 
@@ -170,12 +207,14 @@ def _write_chunk(target, chunk, cancel=None):
         _check_cancel(cancel)
 
 class Transport:
-    def __init__(self, timeout: float = 30, max_download_bytes: int = BOOK_LIMIT):
+    def __init__(self, timeout: float = 30, max_download_bytes: int = BOOK_LIMIT, *, proxy: str | None = None):
+        """``proxy`` (``http://HOST:PORT``) tunnels every request with HTTP CONNECT; TLS stays end to end."""
         if (type(timeout) not in (int, float) or not 0 < timeout <= 300
                 or type(max_download_bytes) is not int or not 0 < max_download_bytes <= BOOK_LIMIT):
             raise ValueError("Timeout must be 0 to 300 seconds and download limit at most 256 MiB.")
         self.timeout = timeout
         self.max_download_bytes = max_download_bytes
+        self.proxy = None if proxy is None else validate_proxy(proxy)
         self.cookies = _cookie_jar()
 
     def close(self) -> None:
@@ -285,17 +324,26 @@ class Transport:
             _remaining(deadline, cancel)
             validate_url(url)
             parsed = urlsplit(url)
-            addresses = _network_call(lambda: public_addresses(parsed.hostname), cancel=cancel, deadline=deadline)
+            if self.proxy is None:
+                host, port = parsed.hostname, 443
+                addresses = _network_call(lambda: public_addresses(host), cancel=cancel, deadline=deadline)
+            else:
+                # The proxy resolves the site's name, so only the proxy endpoint is resolved and checked here.
+                proxy = urlsplit(self.proxy)
+                host, port = proxy.hostname, proxy.port
+                addresses = _network_call(lambda: proxy_addresses(host), cancel=cancel, deadline=deadline)
             remaining = _remaining(deadline, cancel)
             connection = _network_call(lambda: http.client.HTTPSConnection(
-                parsed.hostname, timeout=remaining, context=ssl.create_default_context()), cancel=cancel, deadline=deadline)
-            # TLS still checks the original hostname; the socket uses validated DNS answers.
+                host, port, timeout=remaining, context=ssl.create_default_context()), cancel=cancel, deadline=deadline)
+            if self.proxy is not None:
+                connection.set_tunnel(parsed.hostname, 443)
+            # TLS still checks the site's hostname; the socket uses validated DNS answers.
             def connect(_address, timeout=remaining, source_address=None):
                 last_error = OSError("No reachable public address")
                 for address in addresses:
                     remaining_connect = _remaining(deadline, cancel)
                     try:
-                        sock = socket.create_connection((address, 443), min(timeout, remaining_connect), source_address)
+                        sock = socket.create_connection((address, port), min(timeout, remaining_connect), source_address)
                     except OSError as error:
                         _check_cancel(cancel)
                         last_error = error
@@ -306,6 +354,8 @@ class Transport:
                             sock.close()
                             raise
                         return sock
+                if self.proxy is not None and not isinstance(last_error, TimeoutError):
+                    raise NetworkError("Could not connect to the proxy. Check the proxy setting.", reason="proxy")
                 raise last_error
             connection._create_connection = connect
             response = None

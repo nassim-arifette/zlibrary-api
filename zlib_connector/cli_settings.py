@@ -1,4 +1,5 @@
 """Settings for one CLI run: load once, fill the arguments, print each notice once (stderr)."""
+from functools import partial
 from pathlib import Path
 import sys
 
@@ -8,13 +9,14 @@ from .terminal_text import terminal_text
 
 
 # Option names of the overrides, for messages and ``config list --show-origin``.
-_OPTIONS = {"domain": "--domain", "timeout": "--timeout", "credentials_file": "--credentials", "api_url": "--api-url"}
+_OPTIONS = {"domain": "--domain", "timeout": "--timeout", "credentials_file": "--credentials", "api_url": "--api-url", "proxy": "--proxy"}
 
 
 def overrides(args) -> dict:
     """The values given on the command line in this run (None when not given)."""
     values = {"domain": getattr(args, "domain", None), "timeout": getattr(args, "timeout", None),
-              "credentials_file": getattr(args, "credentials", None), "api_url": getattr(args, "api_url", None)}
+              "credentials_file": getattr(args, "credentials", None), "api_url": getattr(args, "api_url", None),
+              "proxy": getattr(args, "proxy", None)}
     return {key: value for key, value in values.items() if value is not None}
 
 
@@ -41,6 +43,7 @@ def ensure_settings(args, *, environ=None):
         args.domain = settings.domain
     args.domain_source = settings.source_label("domain") if settings.domain is not None else None
     args.timeout = settings.timeout
+    args.proxy = None if getattr(args, "no_proxy", False) else settings.proxy
     if hasattr(args, "api_url") and settings.origin("api_url") != "cli":
         args.api_url = settings.api_url
     if getattr(args, "quiet", False):
@@ -48,6 +51,12 @@ def ensure_settings(args, *, environ=None):
     elif getattr(args, "progress", None) is None:
         args.progress = {"always": True, "never": False}.get(settings.progress)
     return settings
+
+
+def client_factory(args, factory):
+    """``factory`` with the proxy of this run, if any; local API clients never take it."""
+    proxy = getattr(args, "proxy", None)
+    return factory if proxy is None else partial(factory, proxy=proxy)
 
 
 def notice(args, text: str) -> None:

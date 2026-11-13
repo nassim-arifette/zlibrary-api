@@ -141,6 +141,7 @@ Only `config set` and `config unset` create the default folder, with mode `0o700
 | `api_url` | string | loopback HTTP, optional `/v1`; saved as `http://HOST:PORT/v1` | `--api-url` (`jobs`, `tui`) | `ZLIB_API_URL` | `http://127.0.0.1:8000/v1` |
 | `credentials_file` | string | absolute; must exist when used | `--credentials` | `ZLIB_CREDENTIALS` | the lookup below |
 | `progress` | string | `auto` (in a terminal), `always`, `never` | `--progress`, `--no-progress`; `--quiet` hides it | `ZLIB_PROGRESS` | `auto` |
+| `proxy` | string | `http://HOST:PORT`: no credentials, path or query; saved lowercased | `--proxy URL`, `--no-proxy` | `ZLIB_PROXY` | none (direct) |
 
 The file is TOML 1.0 in UTF-8 (a BOM is accepted), at most 64 KiB, one flat table.
 Reading is strict: an unknown key, a table, a wrong type or a bad value stops every
@@ -1033,7 +1034,20 @@ may change. References: [mobile API documentation](https://github.com/baroxyton/
 and [observed response models](https://github.com/heartleo/zlib/blob/main/docs/android-eapi-deep-dive.md).
 
 - HTTPS certificate verification, public DNS validation and pinned addresses on
-  every hop. No system proxy configuration is used.
+  every hop. No system proxy configuration is used: `HTTP_PROXY` and `HTTPS_PROXY`
+  are ignored.
+- With the `proxy` setting (`--proxy`, `ZLIB_PROXY`), each hop opens an HTTP CONNECT
+  tunnel to `HOST:443` with `http.client`'s `set_tunnel`, and TLS runs inside it to
+  the site: the certificate is checked against the site's name as without a proxy.
+  The proxy resolves the site's name, so the address check applies to the proxy
+  endpoint instead: its addresses are resolved and pinned, and only unspecified
+  and multicast addresses are refused. A loopback or LAN proxy is accepted because
+  it was configured explicitly. The CONNECT request carries no header besides the
+  ones `http.client` adds: no cookie, path, form or proxy credentials. A refused
+  tunnel is reported with its HTTP status only (`reason: proxy`); the proxy's own
+  text is not shown. Redirect checks and cookie scoping are unchanged. The local
+  API clients (`jobs`, `queue`, `tui`) never use the proxy. SOCKS and Tor are not
+  supported: the standard library has no SOCKS client.
 - Same-origin 307/308 redirects retain form data; cross-origin form replay is
   rejected. API authentication headers are derived only from cookies applicable
   to the destination and are not forwarded to download CDNs.

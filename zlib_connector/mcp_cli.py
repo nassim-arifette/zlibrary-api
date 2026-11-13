@@ -133,6 +133,11 @@ def _command_arguments(args, download_dir):
         argv += ["--config", str(Path(args.config).expanduser().absolute())]
     if getattr(args, "no_config", False):
         argv.append("--no-config")
+    settings = getattr(args, "settings", None)
+    if getattr(args, "no_proxy", False):
+        argv.append("--no-proxy")
+    elif settings is not None and settings.origin("proxy") == "cli":
+        argv += ["--proxy", settings.proxy]
     timeout = args.timeout
     if download_dir is not None and timeout == 30:
         timeout = 120
@@ -224,6 +229,8 @@ def run_mcp(args, *, client_factory=Client, stdin=None, stdout=None, stderr=None
         hint = print_config(args, download_dir, out)
         print(hint, file=errors, flush=True)
         return 0
+    from .cli_settings import client_factory as with_proxy
+    client_factory = with_proxy(args, client_factory)
     logger = _logger(errors)
     version = server_version()
     backend = Backend(domain=domain, timeout=args.timeout, client_factory=client_factory, store=store,

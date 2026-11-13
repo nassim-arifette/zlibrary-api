@@ -95,7 +95,7 @@ class ConfigCommandTests(unittest.TestCase):
         code, out, _ = self.run_cli("config", "list")
         rows = [line.split(maxsplit=1) for line in out.splitlines()]
         self.assertEqual(["domain", "https://z-lib.sk/"], rows[0])
-        self.assertEqual([["credentials_file", "(not set)"], ["progress", "auto"]], rows[-2:])
+        self.assertEqual([["progress", "auto"], ["proxy", "(not set)"]], rows[-2:])
         code, out, _ = self.run_cli("--timeout", "7", "config", "list", "--show-origin",
                                     environ={"ZLIB_LANGUAGES": "german"})
         lines = {line.split()[0]: line for line in out.splitlines()}
@@ -126,7 +126,7 @@ class ConfigCommandTests(unittest.TestCase):
         self.assertEqual([], [name for name in os.listdir(self.folder) if name.startswith(".config-")])
 
     def test_usage_errors(self):
-        cases = [(("config", "set", "password", "x"), "never stored"), (("config", "get", "proxy"), "Unknown setting"),
+        cases = [(("config", "set", "password", "x"), "never stored"), (("config", "get", "socks"), "Unknown setting"),
                  (("config", "set", "timeout", "1", "2"), "exactly one value"),
                  (("config", "set", "timeout", "abc"), "Invalid value for timeout"),
                  (("config", "set", "download_dir", str(self.root / "missing")), "existing folder"),

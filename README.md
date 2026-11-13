@@ -257,17 +257,21 @@ zlib-cli config unset formats
 
 `config set` saves a setting in `config.toml`: `%APPDATA%\zlibrary-api` on Windows,
 `~/.config/zlibrary-api` elsewhere (`$XDG_CONFIG_HOME/zlibrary-api` when it is set). The keys are
-`domain`, `timeout`, `download_dir`, `languages`, `formats`, `api_url`, `credentials_file` and
-`progress` (`auto`, `always` or `never`). No
+`domain`, `timeout`, `download_dir`, `languages`, `formats`, `api_url`, `credentials_file`,
+`progress` (`auto`, `always` or `never`) and `proxy`. No
 email, password, cookie or token is ever stored there.
 
 - An option given on the command line wins, then a `ZLIB_*` variable (`ZLIB_DOMAIN`, `ZLIB_TIMEOUT`,
   `ZLIB_DOWNLOAD_DIR`, `ZLIB_LANGUAGES`, `ZLIB_FORMATS`, `ZLIB_API_URL`, `ZLIB_CREDENTIALS`,
-  `ZLIB_PROGRESS`; lists are
+  `ZLIB_PROGRESS`, `ZLIB_PROXY`; lists are
   comma-separated), then the file. `--no-config` ignores the file for one run, and `--config FILE`
   (or `ZLIB_CONFIG`) uses another file.
 - Saved formats and languages filter searches only, and each search says so on stderr; `--format`
   and `--language` replace them. They never apply to an `ID:HASH` reference and never choose a book.
+- `proxy` (`http://HOST:PORT`, or `--proxy URL` for one run) sends the site's traffic through an HTTPS
+  proxy with HTTP CONNECT; TLS still runs end to end to the site. `--no-proxy` connects directly.
+  `HTTP_PROXY` and `HTTPS_PROXY` are ignored, and `jobs`, `queue` and `tui` always talk to the local API
+  directly. `doctor` says which proxy it went through.
 - `download_dir` is the default `--output` of `download` and `jobs file`. `serve --downloads` starts
   the download queue there; a saved folder never starts it on its own.
 - A saved `domain` is used instead of the saved session's domain. When they differ, account commands

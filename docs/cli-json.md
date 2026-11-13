@@ -48,7 +48,7 @@ one JSON object, on one line, to stderr, and nothing to stdout. Usage errors are
 | `exit_code` | integer | always | The process exit status |
 | `retryable` | boolean | always | The same request may succeed later without changes. Advisory: nothing retries on its own |
 | `outcome` | string | always | `not_applied`, or `unknown` when an account change or a download may have taken effect |
-| `reason` | string | when known | The network or download cause: `dns`, `blocked_address`, `certificate`, `tls`, `timeout`, `redirect`, `http`, `network`, or a download reason (`unavailable`, `no_link`, `refused`, `format_mismatch`, `protocol`, `size_limit`, `local_write`, `invalid_book`, `save_failed`, `download`) |
+| `reason` | string | when known | The network or download cause: `dns`, `blocked_address`, `certificate`, `tls`, `timeout`, `redirect`, `http`, `network`, `proxy` (the configured proxy could not be reached or refused the tunnel), or a download reason (`unavailable`, `no_link`, `refused`, `format_mismatch`, `protocol`, `size_limit`, `local_write`, `invalid_book`, `save_failed`, `download`) |
 | `quota_may_be_used` | boolean | single-book `download` errors | `true` once the link request was sent: the download may have used quota |
 | `hint` | string | optional | A literal next step, in ASCII |
 | `key`, `source` | string | settings errors | The setting at fault and where it came from: `cli`, `env` or `config`. The value is never shown |
@@ -256,7 +256,7 @@ usual one-line startup refusal (exit 1).
 | `library` | `{favorites: {books, pagination}, history: {books, pagination}, booklists: [...]}` |
 | `login` | `{"authenticated": true, "stored": true, "domain": ...}` |
 | `logout`, `status` | `{state, domain, saved_at, expires_at, verified}`. `status --verify` adds `authenticated: true` and sets `verified: true` |
-| `doctor` | `{results: [{domain, search_ok, checked_at, elapsed_ms, final_domain, result_count, error_code, message}], working_domains, recommended_domain}` |
+| `doctor` | `{results: [{domain, search_ok, checked_at, elapsed_ms, final_domain, result_count, error_code, message}], working_domains, recommended_domain, proxy}` (`proxy` is the `http://HOST:PORT` every probe went through, or null) |
 | `domains` | An array of strings |
 | `check` / `auth-test` (always JSON) | `{reachable, domain, api, search_ok, results, authenticated}` / `{"authenticated": true}` |
 | `jobs add`, `show`, `cancel` / `list` / `resume` / `file` / `watch` | A task `{id, reference, state, created_at, updated_at, progress, cancel_requested, error_code, file_available, error_message, outcome}` / `{tasks, total, limit, offset, paused}` / the server's resume object (`resumed` count) / `{"path": ...}` / NDJSON events `{id, task, paused}` |

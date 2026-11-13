@@ -96,13 +96,14 @@ def parse_html(data: bytes, origin: str) -> _Cards:
 
 class Client:
     """Session-only client. Not thread-safe; use one client per independent session."""
-    def __init__(self, domain: str = "https://z-lib.by/", *, timeout: float = 30, transport: Transport | None = None):
+    def __init__(self, domain: str = "https://z-lib.by/", *, timeout: float = 30, transport: Transport | None = None,
+                 proxy: str | None = None):
         validate_url(domain)
         parsed = urlsplit(domain)
         if parsed.path not in ("", "/") or parsed.query or parsed.fragment:
             raise ValueError("Use the site origin only, for example https://z-lib.by/.")
         self.domain = domain.rstrip("/") + "/"
-        self._transport = transport if transport is not None else Transport(timeout)
+        self._transport = transport if transport is not None else Transport(timeout, proxy=proxy)
         self._authenticated = False
 
     def __enter__(self):

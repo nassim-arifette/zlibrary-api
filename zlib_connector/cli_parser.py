@@ -30,10 +30,11 @@ BOOKLIST_MUTATIONS = ("add", "remove", "create", "edit", "delete")
 # --timeout defaults to None so that an explicit value can be told apart; the settings fill it (default 30).
 GLOBAL_DEFAULTS = {"domain": None, "credentials": None, "timeout": None, "session_file": None, "no_session": False,
                    "json": False, "no_input": False, "interactive": False, "config": None, "no_config": False,
-                   "quiet": False, "progress": None}
+                   "quiet": False, "progress": None, "proxy": None, "no_proxy": False}
 _CONFLICTS = (("no_input", "--no-input", "interactive", "--interactive"),
               ("session_file", "--session-file", "no_session", "--no-session"),
-              ("config", "--config", "no_config", "--no-config"))
+              ("config", "--config", "no_config", "--no-config"),
+              ("proxy", "--proxy", "no_proxy", "--no-proxy"))
 
 
 class CLIParser(argparse.ArgumentParser):
@@ -83,6 +84,10 @@ def _common_arguments(target) -> None:
                         help="settings file for this run (default: ZLIB_CONFIG, else config path)")
     target.add_argument("--no-config", action="store_true", default=suppress,
                         help="ignore the settings file for this run; ZLIB_* variables still apply")
+    target.add_argument("--proxy", default=suppress, metavar="URL",
+                        help="HTTPS proxy as http://HOST:PORT for the site (default: the proxy setting, else none)")
+    target.add_argument("--no-proxy", action="store_true", default=suppress,
+                        help="connect directly for this run, ignoring ZLIB_PROXY and the proxy setting")
     target.add_argument("--session-file", type=Path, default=suppress,
                         help="private saved session (default: state directory/session.json)")
     target.add_argument("--no-session", action="store_true", default=suppress,

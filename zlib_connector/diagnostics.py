@@ -10,7 +10,7 @@ from urllib.parse import urlsplit
 
 from .eapi import Client
 from .errors import AuthenticationError, ChallengeRequired, ConnectorError, FormatChangedError, NetworkError, RateLimitError
-from .transport import validate_url
+from .transport import validate_proxy, validate_url
 
 
 # User-supplied candidates, recorded on 2026-11-09. Presence is not proof of health.
@@ -25,6 +25,7 @@ _MESSAGES = {
     "blocked_address": "The destination resolves to a private or reserved address.",
     "certificate": "HTTPS certificate verification failed.",
     "tls": "TLS negotiation failed.",
+    "proxy": "The proxy could not be reached or refused the tunnel.",
     "timeout": "The probe timed out.",
     "redirect": "The request redirects to another origin or an unsupported flow.",
     "http": "The server returned an unsuccessful HTTP status.",
@@ -55,6 +56,7 @@ class DomainDiagnostic:
 @dataclass(frozen=True)
 class DomainReport:
     results: tuple[DomainDiagnostic, ...]
+    proxy: str | None = None  # The proxy every probe went through, if any
 
     @property
     def recommended_domain(self) -> str | None:
@@ -64,7 +66,7 @@ class DomainReport:
     def to_dict(self) -> dict:
         return {"results": [result.to_dict() for result in self.results],
                 "working_domains": [result.domain for result in self.results if result.search_ok],
-                "recommended_domain": self.recommended_domain}
+                "recommended_domain": self.recommended_domain, "proxy": self.proxy}
 
 
 def _origin(value: str) -> str:
@@ -77,11 +79,11 @@ def _origin(value: str) -> str:
     return "https://" + parsed.netloc.lower().removesuffix(":443") + "/"
 
 
-def _probe(domain: str, timeout: float) -> DomainDiagnostic:
+def _probe(domain: str, timeout: float, proxy: str | None = None) -> DomainDiagnostic:
     checked_at = datetime.now(timezone.utc).isoformat()
     started = monotonic()
     try:
-        with Client(domain, timeout=timeout) as client:
+        with Client(domain, timeout=timeout, proxy=proxy) as client:
             books = client.search("Pride and Prejudice", limit=1)
             return DomainDiagnostic(domain, True, checked_at, round((monotonic() - started) * 1000),
                                     final_domain=client.domain, result_count=len(books))
@@ -102,12 +104,14 @@ def _probe(domain: str, timeout: float) -> DomainDiagnostic:
                                 error_code=code, message=_MESSAGES[code])
 
 
-def diagnose_domains(domains=None, *, timeout: float = 10, workers: int = 4, on_result=None) -> DomainReport:
+def diagnose_domains(domains=None, *, timeout: float = 10, workers: int = 4, on_result=None,
+                     proxy: str | None = None) -> DomainReport:
     """Probe up to 50 HTTPS origins without credentials, preserving input order.
 
     Results describe this network and time only. The recommendation never changes
     configuration or authenticates to another domain. Timeouts apply per request.
     ``on_result(done, total)`` is called after each probe, from the calling thread.
+    ``proxy`` (``http://HOST:PORT``) tunnels every probe; the report names it.
     """
     if type(timeout) not in (int, float) or not math.isfinite(timeout) or not 0 < timeout <= 300:
         raise ValueError("Timeout must be a finite number between 0 and 300 seconds.")
@@ -123,10 +127,12 @@ def diagnose_domains(domains=None, *, timeout: float = 10, workers: int = 4, on_
     if not 1 <= len(values) <= 50:
         raise ValueError("Choose between 1 and 50 domain candidates.")
     origins = tuple(dict.fromkeys(_origin(value) for value in values))
+    if proxy is not None:
+        proxy = validate_proxy(proxy)
     with ThreadPoolExecutor(max_workers=min(workers, len(origins))) as executor:
         results = []
-        for result in executor.map(lambda domain: _probe(domain, timeout), origins):
+        for result in executor.map(lambda domain: _probe(domain, timeout, proxy), origins):
             results.append(result)
             if on_result is not None:
                 on_result(len(results), len(origins))
-    return DomainReport(tuple(results))
+    return DomainReport(tuple(results), proxy)

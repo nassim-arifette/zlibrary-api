@@ -1,8 +1,7 @@
 # zlib-cli: complete CLI implementation spec
 
 Design, 2026-11-11. Status on 2026-11-13: D1 to D3 implemented (see `docs/cli-json.md` and the Settings section of
-`docs/reference.md`), D4 (see "Account changes in the CLI" in `docs/reference.md`), D5 and D6; D7 not
-implemented yet. The owner decided the open questions on 2026-11-12 (section 10).
+`docs/reference.md`), D4 (see "Account changes in the CLI" in `docs/reference.md`), D5, D6 and D7. The owner decided the open questions on 2026-11-12 (section 10).
 
 - **Request:** the owner's "cli complet" item: a coherent command set, JSON for every command (errors
   included), documented exit codes, a strict non-interactive mode, lists on standard input, messages kept
@@ -1144,17 +1143,39 @@ text above:
 
 ### D7. HTTPS proxy
 
-- [ ] **Settings.** The `proxy` key takes `http://HOST:PORT`: no credentials, no path. It comes with
+- [x] **Settings.** The `proxy` key takes `http://HOST:PORT`: no credentials, no path. It comes with
   `--proxy URL`, `--no-proxy` and `ZLIB_PROXY`.
-- [ ] **Transport.** HTTP CONNECT goes through `http.client.HTTPSConnection.set_tunnel`. TLS runs end to
+- [x] **Transport.** HTTP CONNECT goes through `http.client.HTTPSConnection.set_tunnel`. TLS runs end to
   end to the site, and the certificate checks do not change.
-- [ ] **Recorded decision.** Behind a proxy, the proxy resolves the site's name, so the public-address
+- [x] **Recorded decision.** Behind a proxy, the proxy resolves the site's name, so the public-address
   check moves to the proxy endpoint. A loopback or LAN proxy is accepted because it was configured
   explicitly.
-- [ ] **Explicit only.** `HTTP_PROXY` and `HTTPS_PROXY` stay ignored. The local API client never uses the
+- [x] **Explicit only.** `HTTP_PROXY` and `HTTPS_PROXY` stay ignored. The local API client never uses the
   proxy. `doctor` reports whether a proxy was used.
-- [ ] **Later.** SOCKS and Tor come later: the standard library has no SOCKS client.
-- [ ] **Review.** A separate security review happens before the merge.
+- **Later.** SOCKS and Tor come later: the standard library has no SOCKS client.
+- [x] **Review.** A separate security review happens before the merge.
+
+Implementation notes (D7): `transport.validate_proxy` canonicalizes the URL and refuses credentials,
+paths, queries, other schemes and missing ports without echoing the value. `Transport(proxy=...)` resolves
+the proxy with `proxy_addresses` (unspecified and multicast refused, loopback and LAN allowed), pins the
+socket to those answers, and calls `set_tunnel(site, 443)` on every hop, so redirects tunnel to their own
+host after `validate_url`. `cli_settings.client_factory(args, Client)` adds the proxy to the site client
+factory of every command, `serve` and `mcp`; `LocalAPI` and `CatalogAPI` have no proxy parameter. A refused
+CONNECT becomes `NetworkError(reason="proxy")` with the status code only. `DomainReport.proxy` names the
+proxy in `doctor --json`, and the text output adds `Through proxy: URL (source)`.
+
+Security review (before merge): the threat is a proxy that is trusted for reachability but not for
+content. It sees the site's host name and port (as a DNS resolver would) and the traffic volume; it does
+not see paths, cookies, credentials, forms or downloaded files, because TLS is end to end with certificate
+and host name checks unchanged (verified: the CONNECT line is the only plain text, and the next record is a
+TLS ClientHello naming the site). A proxy that answers instead of tunnelling cannot pass the certificate
+check. The proxy URL cannot hold credentials, so none can leak in logs, `config list`, `doctor` or
+`mcp --print-config`. Implicit `HTTP_PROXY`/`HTTPS_PROXY` stay ignored, so a hostile environment cannot
+redirect traffic without `ZLIB_PROXY`, which is named in every report. A refused tunnel's text from the
+proxy is never shown. The loopback API is never proxied, so its bearer token never reaches the proxy.
+Residual risk, accepted: the proxy can block, delay or log host names and timing, and a LAN proxy can be
+reached by the address check that a site address would fail; both follow from configuring it. Each read of the CONNECT reply is bounded by the
+request's remaining time, as for a site's reply, so a slow proxy delays a request but cannot leak data.
 
 ## 7. Command set after D1 to D6
 

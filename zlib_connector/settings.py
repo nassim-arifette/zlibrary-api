@@ -24,11 +24,12 @@ from .session_lock import PrivateLockError, PrivateLockTimeout, private_lock
 from .terminal_text import terminal_text
 
 
-KEYS = ("domain", "timeout", "download_dir", "languages", "formats", "api_url", "credentials_file", "progress")
+KEYS = ("domain", "timeout", "download_dir", "languages", "formats", "api_url", "credentials_file", "progress", "proxy")
 LIST_KEYS = frozenset({"languages", "formats"})
 VARIABLES = {"domain": "ZLIB_DOMAIN", "timeout": "ZLIB_TIMEOUT", "download_dir": "ZLIB_DOWNLOAD_DIR",
              "languages": "ZLIB_LANGUAGES", "formats": "ZLIB_FORMATS", "api_url": "ZLIB_API_URL",
-             "credentials_file": "ZLIB_CREDENTIALS", "progress": "ZLIB_PROGRESS"}
+             "credentials_file": "ZLIB_CREDENTIALS", "progress": "ZLIB_PROGRESS",
+             "proxy": "ZLIB_PROXY"}
 CONFIG_VARIABLE = "ZLIB_CONFIG"
 SECRET_KEYS = frozenset({"email", "password", "token", "api_token", "cookie", "cookies", "session", "secret"})
 DEFAULT_TIMEOUT = 30.0
@@ -39,7 +40,7 @@ LOCK_TIMEOUT = 5.0
 HEADER = '# zlib-cli settings. "zlib-cli config set" rewrites this file and drops comments.'
 SECRET_MESSAGE = "Credentials and session data are never stored in the config file."
 _DEFAULTS = {"domain": None, "timeout": DEFAULT_TIMEOUT, "download_dir": None, "languages": (), "formats": (),
-             "api_url": DEFAULT_API_URL, "credentials_file": None, "progress": "auto"}
+             "api_url": DEFAULT_API_URL, "credentials_file": None, "progress": "auto", "proxy": None}
 PROGRESS_CHOICES = ("auto", "always", "never")
 
 
@@ -65,6 +66,7 @@ class Settings:
     api_url: str = DEFAULT_API_URL
     credentials_file: Path | None = None
     progress: str = "auto"  # auto (only in a terminal), always or never
+    proxy: str | None = None  # http://HOST:PORT, used with HTTP CONNECT for the site only
     config_path: Path | None = None
     config_exists: bool = False
     config_source: str = "default"  # cli (--config), env (ZLIB_CONFIG) or default
@@ -180,6 +182,11 @@ def validate(key, value, *, source="config"):
         if value not in PROGRESS_CHOICES:
             raise ValueError("Choose auto, always or never.")
         return value
+    if key == "proxy":
+        from .transport import validate_proxy
+        if not isinstance(value, str):
+            raise TypeError
+        return validate_proxy(value.strip())
     raise KeyError(key)
 
 

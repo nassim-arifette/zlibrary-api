@@ -21,7 +21,7 @@ from .cli_tui import run_tui
 from .cli_progress import ProgressDisplay, Ticker
 from .cli_batch import is_batch, run_batch_command
 from .cli_config import run_config
-from .cli_settings import cli_domain, default_output, ensure_settings, notice, with_configured_filters
+from .cli_settings import cli_domain, client_factory, default_output, ensure_settings, notice, with_configured_filters
 from .cli_session import AccountSession, local_session_command, session_message
 from .cli_table import print_table
 from .cli_examples import DEPRECATED
@@ -156,6 +156,7 @@ def _run(argv, operation) -> int:
         sys.stdout.write(glue(args.shell))
         return 0
     ensure_settings(args)
+    make_client = client_factory(args, Client)
     policy = InputPolicy.from_args(args)
 
     def ask_line(label):
@@ -167,7 +168,7 @@ def _run(argv, operation) -> int:
     if args.command == "download":
         args.output = default_output(args)
         if is_batch(args):
-            return run_batch_command(args, client_factory=Client, credentials_loader=load_credentials,
+            return run_batch_command(args, client_factory=make_client, credentials_loader=load_credentials,
                                      prompt=ask_line, password_prompt=ask_password, policy=policy)
         args.query = args.query[0]
         args.page = 1 if args.page is None else args.page
@@ -180,7 +181,7 @@ def _run(argv, operation) -> int:
     if args.command == "queue":
         return run_queue(args)
     if args.command in ("status", "logout"):
-        status = local_session_command(args, client_factory=Client)
+        status = local_session_command(args, client_factory=make_client)
         if args.json:
             print_json(status)
         else:
@@ -188,7 +189,7 @@ def _run(argv, operation) -> int:
                   else session_message(status))
         return 0
     if args.command == "serve":
-        run_server(args, client_factory=Client, credentials_loader=load_credentials, prompt=ask_line,
+        run_server(args, client_factory=make_client, credentials_loader=load_credentials, prompt=ask_line,
                    password_prompt=ask_password, policy=policy)
         return 0
     if args.command == "domains":
@@ -203,7 +204,7 @@ def _run(argv, operation) -> int:
         domains = args.domains or ([explicit] if explicit else None)
         ticker = Ticker(args.progress is True or (args.progress is None and is_terminal(sys.stderr)))
         try:
-            report = diagnose_domains(domains, timeout=args.timeout, workers=args.workers,
+            report = diagnose_domains(domains, timeout=args.timeout, workers=args.workers, proxy=args.proxy,
                                       on_result=lambda done, total: ticker(f"Checked {done} of {total}"))
         finally:
             ticker.close()
@@ -214,6 +215,8 @@ def _run(argv, operation) -> int:
                         [(result.domain, "ok" if result.search_ok else result.error_code, f"{result.elapsed_ms} ms",
                           result.message) for result in report.results], flexible=(3,), right=(2,))
             print(f"Suggested domain: {report.recommended_domain or 'none'}")
+            if report.proxy is not None:
+                print(f"Through proxy: {report.proxy} ({args.settings.source_label('proxy')})")
             configured = args.settings.domain if explicit is None else None
             if configured is not None:
                 origin = "config" if args.settings.origin("domain") == "config" else args.domain_source
@@ -225,7 +228,7 @@ def _run(argv, operation) -> int:
         notice(args, DEPRECATED[args.command])
     if args.command == "check":
         domain = args.domain or "https://z-lib.by/"
-        with Client(domain, timeout=args.timeout) as client:
+        with make_client(domain, timeout=args.timeout) as client:
             books = client.search("Pride and Prejudice", limit=1)
             print_json({"reachable": True, "domain": client.domain, "api": "eapi", "search_ok": True,
                         "results": len(books), "authenticated": False})
@@ -291,13 +294,13 @@ def _run(argv, operation) -> int:
     if reference is not None:
         BookReference.parse(reference, args.domain)
     if args.command in CATALOG_COMMANDS and getattr(args, "anonymous", False):
-        with Client(args.domain or "https://z-lib.by/", timeout=args.timeout) as client:
+        with make_client(args.domain or "https://z-lib.by/", timeout=args.timeout) as client:
             _announce(args, cli_filters)
             run_catalog_command(client, args, filters)
         return 0
     account = AccountSession(args, credentials_loader=load_credentials)
     account.require_input(policy, explicit=args.command in ("login", "auth-test"))
-    with Client(account.domain, timeout=args.timeout) as client:
+    with make_client(account.domain, timeout=args.timeout) as client:
         if reference is not None:
             BookReference.parse(reference, client.domain)
         saved = account.snapshot.session if account.snapshot is not None else None
