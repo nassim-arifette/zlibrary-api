@@ -54,6 +54,8 @@ def _text_value(key, value) -> str:
         return ", ".join(value)
     if key == "timeout":
         return format(float(value), "g")
+    if isinstance(value, bool):
+        return "true" if value else "false"
     return str(value)
 
 

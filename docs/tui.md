@@ -70,6 +70,7 @@ under its text.
 | `/recommended` | Recommended for you |
 | `/similar` | More like this; listed only when a book is selected or open |
 | `/download` | Download the selected or open book; listed only when downloads are available |
+| `/settings` | Download folder, confirmation, domain, timeout and proxy |
 | `/refresh` | Reload this page; listed on every page except Home and the search form |
 | `/home` | Home |
 | `/help` | Keys and tips |
@@ -101,6 +102,7 @@ In book lists:
 | `m` | More like this: books similar to the selected book |
 | `d` | Download the selected book, after a confirmation |
 | `x` | Cancel the running download |
+| `,` | Settings |
 | `r` | Refresh, or retry after an error |
 
 With a mouse, click a row to select it and click it again to open it.
@@ -170,7 +172,8 @@ position.
 
 ## Download a book
 
-Press `d` on a selected book, in a list or on its details page. A dialog shows
+Press `d` on a selected book, in a list or on its details page. Unless "Ask
+first" is off in Settings, a dialog shows
 the title, format, size and the folder it will be saved in, and reminds you
 that it uses one download from your daily allowance. Enter on **Download**
 starts it; Esc cancels and nothing is sent.
@@ -186,6 +189,26 @@ Quitting stops a running download: the first `q` warns you, a second one
 within five seconds quits. With the private server, unfinished downloads end
 with the session. A running `zlib-cli serve` has downloads on unless it was
 started with `--no-downloads` or `--anonymous`; then the TUI says so.
+
+## Settings
+
+`,` (or `/settings`) opens the settings that matter in the TUI:
+
+| Field | Setting | Effect |
+| --- | --- | --- |
+| Download folder | `download_dir` | Where `d` saves books; empty means your Downloads folder. Applies at once. |
+| Ask first | `confirm_downloads` | Ask before each download. Off: `d` downloads at once. Applies at once. |
+| Domain | `domain` | The Z-Library site; empty means the saved session's. Next start. |
+| Timeout | `timeout` | Seconds to wait for Z-Library, up to 300. Next start. |
+| Proxy | `proxy` | `http://HOST:PORT` for the site's traffic; empty connects directly. Next start. |
+
+↑/↓ or Tab move between fields, Space toggles Ask first, Enter or Ctrl+S
+saves and Esc leaves without saving. The page writes the same `config.toml`
+as `zlib-cli config set`, with the same checks: an invalid value stays on the
+page with its reason and nothing is written; an empty field removes the
+setting. A value set by a `ZLIB_*` variable or a command-line option is shown
+greyed out, since it would override the file. With `--no-config` the page is
+read-only.
 
 ## Search
 

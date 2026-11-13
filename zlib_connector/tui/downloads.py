@@ -126,6 +126,10 @@ class DownloadRunner:
         self._thread: threading.Thread | None = None
         self._task_id: str | None = None
 
+    def set_folder(self, folder: Path) -> None:
+        """Save the next downloads in folder; a running one keeps its folder."""
+        self._folder = Path(folder)
+
     @property
     def active(self) -> bool:
         return self._thread is not None and self._thread.is_alive()

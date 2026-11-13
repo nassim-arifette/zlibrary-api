@@ -178,7 +178,7 @@ class SortSelect(Select, inherit_bindings=False):
 HELP_SECTIONS = (
     ("Global", (("/ or ctrl+p", "Commands"), ("s or 4", "Search books"), ("f or 1", "Favorites"),
                 ("b or 2", "Booklists"), ("h or 3", "Download history"), ("5", "Popular books"),
-                ("6", "Recommended for you"), ("? or f1", "This help"),
+                ("6", "Recommended for you"), (",", "Settings"), ("? or f1", "This help"),
                 ("esc", "Back, or Home from a first page"), ("q or ctrl+c", "Quit"))),
     ("Book lists", (("↑ ↓ or j k", "Select a book"), ("pgup pgdn", "Move by a screen"),
                     ("home end", "First or last book"), ("← → or p n", "Previous or next page"),

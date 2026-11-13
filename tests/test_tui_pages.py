@@ -26,7 +26,7 @@ if TEXTUAL_AVAILABLE:
 
 
 ALL_COMMANDS = ["/search", "/favorites", "/booklists", "/history", "/popular", "/recommended", "/similar",
-                "/refresh", "/home", "/help", "/theme", "/quit"]
+                "/refresh", "/home", "/help", "/settings", "/theme", "/quit"]
 
 
 def listed(app) -> list[str]:
