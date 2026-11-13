@@ -309,7 +309,7 @@ class HttpDownloadTests(unittest.TestCase):
     def test_file_response_has_an_absolute_deadline(self):
         class SlowStream(TrackedStream):
             def read(self, count=-1):
-                time.sleep(0.03)
+                time.sleep(0.1)  # Well past the deadline even with Windows' 15.6 ms monotonic clock ticks.
                 return super().read(count)
 
         with download_server() as (server, _, managers, _):
