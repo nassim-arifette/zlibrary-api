@@ -102,11 +102,12 @@ def _probe(domain: str, timeout: float) -> DomainDiagnostic:
                                 error_code=code, message=_MESSAGES[code])
 
 
-def diagnose_domains(domains=None, *, timeout: float = 10, workers: int = 4) -> DomainReport:
+def diagnose_domains(domains=None, *, timeout: float = 10, workers: int = 4, on_result=None) -> DomainReport:
     """Probe up to 50 HTTPS origins without credentials, preserving input order.
 
     Results describe this network and time only. The recommendation never changes
     configuration or authenticates to another domain. Timeouts apply per request.
+    ``on_result(done, total)`` is called after each probe, from the calling thread.
     """
     if type(timeout) not in (int, float) or not math.isfinite(timeout) or not 0 < timeout <= 300:
         raise ValueError("Timeout must be a finite number between 0 and 300 seconds.")
@@ -123,5 +124,9 @@ def diagnose_domains(domains=None, *, timeout: float = 10, workers: int = 4) -> 
         raise ValueError("Choose between 1 and 50 domain candidates.")
     origins = tuple(dict.fromkeys(_origin(value) for value in values))
     with ThreadPoolExecutor(max_workers=min(workers, len(origins))) as executor:
-        results = tuple(executor.map(lambda domain: _probe(domain, timeout), origins))
-    return DomainReport(results)
+        results = []
+        for result in executor.map(lambda domain: _probe(domain, timeout), origins):
+            results.append(result)
+            if on_result is not None:
+                on_result(len(results), len(origins))
+    return DomainReport(tuple(results))

@@ -173,7 +173,7 @@ class Transport:
     def __init__(self, timeout: float = 30, max_download_bytes: int = BOOK_LIMIT):
         if (type(timeout) not in (int, float) or not 0 < timeout <= 300
                 or type(max_download_bytes) is not int or not 0 < max_download_bytes <= BOOK_LIMIT):
-            raise ValueError("Timeout must be 0–300 seconds and download limit at most 256 MiB.")
+            raise ValueError("Timeout must be 0 to 300 seconds and download limit at most 256 MiB.")
         self.timeout = timeout
         self.max_download_bytes = max_download_bytes
         self.cookies = _cookie_jar()

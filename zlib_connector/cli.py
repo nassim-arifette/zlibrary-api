@@ -17,13 +17,15 @@ from .http_cli import run_server
 from .mcp_cli import run_mcp
 from .cli_jobs import run_jobs
 from .cli_tui import run_tui
-from .cli_progress import ProgressDisplay
+from .cli_progress import ProgressDisplay, Ticker
 from .cli_batch import is_batch, run_batch_command
 from .cli_config import run_config
-from .cli_settings import cli_domain, default_output, ensure_settings, with_configured_filters
+from .cli_settings import cli_domain, default_output, ensure_settings, notice, with_configured_filters
 from .cli_session import AccountSession, local_session_command, session_message
-from .cli_output import CommandError, InputRequired, prepare_streams, print_json, report_error, wants_json
-from .cli_terminal import InputPolicy, ask, choose, confirm, password
+from .cli_table import print_table
+from .cli_examples import DEPRECATED
+from .cli_output import CommandError, InputRequired, UsageError, prepare_streams, print_json, report_error, wants_json
+from .cli_terminal import InputPolicy, ask, choose, confirm, is_terminal, password
 from .cli_parser import (BOOKLIST_MUTATIONS, CATALOG_COMMANDS, DISCOVERY_COMMANDS, LIBRARY_COMMANDS, command_names,
                          finish, parser)
 from .cli_views import account_confirmation, booklist_options, run_catalog_command, run_library_command, show_books
@@ -129,7 +131,12 @@ def _command_name(argv):
 
 def _run(argv, operation) -> int:
     command_parser = parser()
-    args, extras = command_parser.parse_known_args(argv)
+    try:
+        args, extras = command_parser.parse_known_args(argv)
+    except UsageError as error:
+        if getattr(error, "help_text", None) and not wants_json(argv):
+            sys.stderr.write(error.help_text + "\n")
+        raise
     finish(args)
     operation.args = args
     if extras:
@@ -184,13 +191,18 @@ def _run(argv, operation) -> int:
         # doctor finds working domains: it ignores the environment's and the config file's domain.
         explicit = cli_domain(args)
         domains = args.domains or ([explicit] if explicit else None)
-        report = diagnose_domains(domains, timeout=args.timeout, workers=args.workers)
+        ticker = Ticker(args.progress is True or (args.progress is None and is_terminal(sys.stderr)))
+        try:
+            report = diagnose_domains(domains, timeout=args.timeout, workers=args.workers,
+                                      on_result=lambda done, total: ticker(f"Checked {done} of {total}"))
+        finally:
+            ticker.close()
         if args.json:
             print_json(report.to_dict())
         else:
-            for result in report.results:
-                state = "ok" if result.search_ok else result.error_code
-                print(f"{result.domain}  {state}  {result.elapsed_ms} ms  {result.message}")
+            print_table(("DOMAIN", "STATE", "TIME", "MESSAGE"),
+                        [(result.domain, "ok" if result.search_ok else result.error_code, f"{result.elapsed_ms} ms",
+                          result.message) for result in report.results], flexible=(3,), right=(2,))
             print(f"Suggested domain: {report.recommended_domain or 'none'}")
             configured = args.settings.domain if explicit is None else None
             if configured is not None:
@@ -199,6 +211,8 @@ def _run(argv, operation) -> int:
                 if report.recommended_domain and report.recommended_domain != configured:
                     print(f"To use it: zlib-cli config set domain {report.recommended_domain}")
         return 0 if report.recommended_domain else 1
+    if args.command in DEPRECATED and not args.json:
+        notice(args, DEPRECATED[args.command])
     if args.command == "check":
         domain = args.domain or "https://z-lib.by/"
         with Client(domain, timeout=args.timeout) as client:
@@ -293,6 +307,11 @@ def _run(argv, operation) -> int:
             profile = client.get_profile()
             if args.json:
                 print_json(profile.to_dict() if args.command == "profile" else profile.quota.to_dict())
+            elif args.command == "profile":
+                print(f"Account on {client.domain}")
+                print("Download quota (today)")
+                for name, value in profile.quota.to_dict().items():
+                    print(f"  {name.capitalize() + ':':<11}{value if value is not None else 'unknown'}")
             else:
                 for name, value in profile.quota.to_dict().items():
                     print(f"{name.capitalize()}: {value if value is not None else 'unknown'}")

@@ -30,7 +30,7 @@ def _read_token(path: Path) -> str:
     except UnicodeError:
         raise ValueError("The API token file is not a valid ASCII token.") from None
     if not re.fullmatch(r"[A-Za-z0-9_-]{32,256}", value):
-        raise ValueError("The API token file must contain 32–256 URL-safe characters.")
+        raise ValueError("The API token file must contain 32 to 256 URL-safe characters.")
     return value
 
 

@@ -31,6 +31,9 @@ guessed from the number of returned books. Totals describe the upstream result s
 
 `check` exercises a real public API search, not merely the site's homepage or
 domain listing. `auth-test` validates both login cookies and the account profile.
+Both are deprecated: they are hidden from help and print one note on stderr
+(`doctor DOMAIN` and `login` then `status --verify` replace them); their behavior and
+JSON are unchanged, and they stay for at least one more release.
 
 `doctor` probes the known candidate domains with isolated anonymous clients and
 up to four concurrent requests (`--workers 1` through `8`). Supply explicit HTTPS
@@ -126,6 +129,7 @@ Only `config set` and `config unset` create the default folder, with mode `0o700
 | `formats` | array of strings | `pdf`, `epub`, `djvu` | `--format` | `ZLIB_FORMATS` | none |
 | `api_url` | string | loopback HTTP, optional `/v1`; saved as `http://HOST:PORT/v1` | `--api-url` (`jobs`, `tui`) | `ZLIB_API_URL` | `http://127.0.0.1:8000/v1` |
 | `credentials_file` | string | absolute; must exist when used | `--credentials` | `ZLIB_CREDENTIALS` | the lookup below |
+| `progress` | string | `auto` (in a terminal), `always`, `never` | `--progress`, `--no-progress`; `--quiet` hides it | `ZLIB_PROGRESS` | `auto` |
 
 The file is TOML 1.0 in UTF-8 (a BOM is accepted), at most 64 KiB, one flat table.
 Reading is strict: an unknown key, a table, a wrong type or a bad value stops every

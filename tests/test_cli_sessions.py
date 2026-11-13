@@ -211,7 +211,8 @@ class CliSessionTests(unittest.TestCase):
             with self.subTest(args=args), patch("zlib_connector.cli_session.SessionStore", side_effect=AssertionError("Session store was used")):
                 code, _, errors, connections, loader, _ = self.run_cli(args, replies=replies, credentials=True)
             self.assertEqual(code, 0)
-            self.assertEqual(errors, "")
+            self.assertEqual(errors, "Note: auth-test is deprecated; use zlib-cli login, then zlib-cli status --verify.\n"
+                             if args == ["auth-test"] else "")
             self.assertEqual(connections[0].calls[0][1], "/rpc.php")
             loader.assert_called_once_with(None)
             self.assertFalse(self._isolated_session_state.exists())

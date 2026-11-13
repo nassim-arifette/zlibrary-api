@@ -76,7 +76,7 @@ def validate_reference(value: str) -> str:
 
 def validate_idempotency_key(value: str) -> str:
     if not isinstance(value, str) or re.fullmatch(r"[A-Za-z0-9._~-]{8,128}", value) is None:
-        raise ValueError("An idempotency key must contain 8–128 ASCII letters, digits or ._~- characters.")
+        raise ValueError("An idempotency key must contain 8 to 128 ASCII letters, digits or ._~- characters.")
     return value
 
 

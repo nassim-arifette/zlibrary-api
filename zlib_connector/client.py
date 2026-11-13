@@ -145,11 +145,11 @@ class Client:
         self._require_login()
         query = query.strip()
         if not query or len(query) > 500:
-            raise ValueError("Query must contain 1–500 characters.")
+            raise ValueError("Query must contain 1 to 500 characters.")
         if extension is not None and extension not in SUPPORTED_FORMATS:
             raise ValueError("Supported formats: pdf, epub, djvu.")
         if not 1 <= page <= 1000 or not 1 <= limit <= 50:
-            raise ValueError("Page must be 1–1000 and result limit 1–50.")
+            raise ValueError("Page must be 1 to 1000 and result limit 1 to 50.")
         parameters = [("page", str(page))] + [("extensions[]", ext) for ext in ((extension,) if extension else SUPPORTED_FORMATS)]
         url = urljoin(self.domain, "s/" + quote(query, safe="")) + "?" + urlencode(parameters)
         response = self._transport.request(url)

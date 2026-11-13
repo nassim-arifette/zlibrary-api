@@ -47,7 +47,7 @@ def add_serve_parser(commands):
     folders.add_argument("--downloads", action="store_true",
                          help="enable durable download tasks in the download_dir setting's folder")
     command.add_argument("--max-download-tasks", type=int, default=1000,
-                         help="maximum retained tasks per account (1–10000; default: 1000)")
+                         help="maximum retained tasks per account (1-10000; default: 1000)")
     return command
 
 

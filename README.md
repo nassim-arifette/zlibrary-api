@@ -98,8 +98,8 @@ zlib-cli download ID:HASH --output books
 A title, author or ISBN is searched with the filters of `search`, and you choose a result
 (`--pick N` chooses without asking). A reference downloads that edition directly. `--output` must be
 an existing folder; the default is the current one. PDF, EPUB and DjVu files up to 256 MiB are
-supported. In a terminal, progress shows on stderr; `--progress` and `--no-progress` force it on or
-off.
+supported. In a terminal, progress shows on stderr; the global `--progress` and `--no-progress`
+force it on or off, and `--quiet` hides notes and progress but keeps data and errors.
 
 Ctrl+C cancels and removes the partial file, and a book is saved only after its file is checked.
 Downloads are never retried automatically and cannot be resumed. Once the download link was
@@ -107,7 +107,7 @@ requested, a download can count against your quota even if it fails or you cance
 
 `zlib-cli shell` signs in once, then takes `search "QUERY" [filters]` (quote the query when you add
 filters), `next`, `prev`, `download NUMBER [FOLDER]` for the last page shown, and `quit`. It also
-accepts `--progress` and `--no-progress`.
+accepts the global `--progress`, `--no-progress` and `--quiet`.
 
 ### A reading list
 
@@ -254,11 +254,13 @@ zlib-cli config unset formats
 
 `config set` saves a setting in `config.toml`: `%APPDATA%\zlibrary-api` on Windows,
 `~/.config/zlibrary-api` elsewhere (`$XDG_CONFIG_HOME/zlibrary-api` when it is set). The keys are
-`domain`, `timeout`, `download_dir`, `languages`, `formats`, `api_url` and `credentials_file`. No
+`domain`, `timeout`, `download_dir`, `languages`, `formats`, `api_url`, `credentials_file` and
+`progress` (`auto`, `always` or `never`). No
 email, password, cookie or token is ever stored there.
 
 - An option given on the command line wins, then a `ZLIB_*` variable (`ZLIB_DOMAIN`, `ZLIB_TIMEOUT`,
-  `ZLIB_DOWNLOAD_DIR`, `ZLIB_LANGUAGES`, `ZLIB_FORMATS`, `ZLIB_API_URL`, `ZLIB_CREDENTIALS`; lists are
+  `ZLIB_DOWNLOAD_DIR`, `ZLIB_LANGUAGES`, `ZLIB_FORMATS`, `ZLIB_API_URL`, `ZLIB_CREDENTIALS`,
+  `ZLIB_PROGRESS`; lists are
   comma-separated), then the file. `--no-config` ignores the file for one run, and `--config FILE`
   (or `ZLIB_CONFIG`) uses another file.
 - Saved formats and languages filter searches only, and each search says so on stderr; `--format`
@@ -277,7 +279,11 @@ The [technical reference](docs/reference.md#settings) has every rule.
 
 - Results go to stdout; prompts, progress and errors go to stderr. `--json` gives JSON results and
   errors on every command that prints results except `shell`, `serve` and `tui`; `check` and
-  `auth-test` always print JSON.
+  `auth-test` always print JSON. Both are deprecated and hidden from help: use `doctor DOMAIN`, and
+  `login` then `status --verify`.
+- `zlib-cli --help` groups the commands, and `zlib-cli COMMAND --help` ends with examples. Text tables
+  print one line per book and never shorten an `ID:HASH` reference; text output may change, so
+  scripts should use `--json`.
 - Without a terminal, account changes need `--yes`. For one book, pass `--pick N` or a reference so
   that nothing asks. Any list option, even `--yes`, makes `download` a list run, which needs `--yes`
   (except with `--dry-run`) and, for searched items, `--pick N`. A list run prints one line per book
@@ -376,7 +382,7 @@ progress and cancellation, reading lists, account collections and domain checks.
 | PowerShell refuses to run `Activate.ps1` | Run `Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned` (for that window only), then activate again. |
 | `Use --yes ...`, `... needs a terminal` or `No saved session, and no terminal to sign in.` | Without a terminal nothing is asked: add the option the message names (`--yes`, `--pick N`), run `zlib-cli login` in a terminal first, or add `--interactive` to answer from standard input. |
 | A domain is blocked, stops responding or asks for browser verification | Run `doctor` again, then `zlib-cli --domain URL login` on a working domain. This client cannot complete browser verification. |
-| Login fails | Check the domain, email and password; `auth-test` tests them without touching the saved session. Repeated logins do not fix a blocked domain. |
+| Login fails | Check the domain, email and password; `login` then `status --verify` tests them. Repeated logins do not fix a blocked domain. |
 | `The saved session belongs to another domain` | The message names what chose the domain (`--domain`, `ZLIB_DOMAIN`, the config file or the credentials file). Drop or change it, or run `login` on the new domain. |
 | The saved session expired or is refused | Run `login` again on the same domain. A temporary network failure leaves the session intact. |
 | Another process changed the saved session | Check `status` before repeating `login` or `logout`. |

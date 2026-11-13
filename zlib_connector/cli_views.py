@@ -1,8 +1,8 @@
 """Render catalog and account commands without owning authentication or input."""
 import json
-import sys
 
 from .cli_output import print_json
+from .cli_table import print_books, print_table
 from .eapi import Client
 from .search import SearchFilters
 from .books import BookReference
@@ -39,16 +39,7 @@ def account_confirmation(args, domain: str) -> str:
 
 
 def show_books(books, *, file=None):
-    file = sys.stdout if file is None else file
-    if not books:
-        print("No books found.", file=file)
-    for index, book in enumerate(books, 1):
-        reference = f" · {book.book_id}:{book.book_hash}" if book.book_id and book.book_hash else ""
-        saved = " [saved]" if book.is_favorite else ""
-        print(f"{index:2}. {book.title}{saved}\n    {book.authors} · {book.year} · {book.language} · {book.extension.upper() or '?'} · {book.size}{reference}", file=file)
-        if getattr(book, "entry_id", None):
-            print(f"    Booklist entry: {book.entry_id}", file=file)
-
+    print_books(books, file=file)
 
 
 def show_search(client: Client, args, filters: SearchFilters):
@@ -59,7 +50,7 @@ def show_search(client: Client, args, filters: SearchFilters):
             print_json(result.to_dict())
         else:
             show_books(result.books)
-            print(f"Page {result.page} · total: {result.total_items if result.total_items is not None else 'unknown'}")
+            print(f"Page {result.page}  total: {result.total_items if result.total_items is not None else 'unknown'}")
     else:
         books = client.search(args.query, **options)
         if args.json:
@@ -90,9 +81,10 @@ def show_book_command(client: Client, args):
         elif not formats:
             print("The server reported no alternative formats.")
         else:
-            for item in formats:
-                support = "" if item.to_dict()["download_supported"] else " (download unsupported)"
-                print(f"{item.book_id}:{item.book_hash} · {item.extension.upper()} · {item.size}{support}")
+            print_table(("EXT", "SIZE", "DOWNLOAD", "REFERENCE"),
+                        [(item.extension.upper(), item.size,
+                          "yes" if item.to_dict()["download_supported"] else "unsupported",
+                          f"{item.book_id}:{item.book_hash}") for item in formats])
 
 
 
@@ -143,15 +135,16 @@ def run_library_command(client: Client, args):
     def show_page(page):
         show_books(page.books)
         total = page.total_items if page.total_items is not None else "unknown"
-        print(f"Page {page.page} · total: {total}")
+        print(f"Page {page.page}  total: {total}")
 
     def show_lists(lists):
-        if not lists:
-            print("No booklists found.")
+        rows = []
         for item in lists:
             count = item.book_count if item.book_count is not None else "unknown"
             visibility = "unknown" if item.is_public is None else "public" if item.is_public else "private"
-            print(f"{item.booklist_id} · {item.title} · {count} books · {visibility}")
+            rows.append((item.booklist_id, item.title, count, visibility))
+        print_table(("BOOKLIST_ID", "TITLE", "BOOKS", "VISIBILITY"), rows, flexible=(1,), right=(2,),
+                    empty="No booklists found.")
 
     if args.command == "favorites" and args.favorite_action in ("add", "remove"):
         result = client.set_favorite(args.reference, saved=args.favorite_action == "add")

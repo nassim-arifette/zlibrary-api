@@ -22,7 +22,7 @@ FIELD_HELP = {"query": "Title, author or ISBN.", "years": "Publication years, in
 ROWS = ("query", "year-from", "year-to", "languages", "formats", "order", "submit")
 EMPTY_QUERY = "Type a title, author or ISBN."
 # Filter messages worded for the Languages field; any other message is shown as SearchFilters gives it.
-LANGUAGE_ERRORS = {"Filter values must contain 1–64 printable characters.":
+LANGUAGE_ERRORS = {"Filter values must contain 1 to 64 printable characters.":
                    "Each language must be 1–64 printable characters."}
 
 

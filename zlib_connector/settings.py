@@ -24,11 +24,11 @@ from .session_lock import PrivateLockError, PrivateLockTimeout, private_lock
 from .terminal_text import terminal_text
 
 
-KEYS = ("domain", "timeout", "download_dir", "languages", "formats", "api_url", "credentials_file")
+KEYS = ("domain", "timeout", "download_dir", "languages", "formats", "api_url", "credentials_file", "progress")
 LIST_KEYS = frozenset({"languages", "formats"})
 VARIABLES = {"domain": "ZLIB_DOMAIN", "timeout": "ZLIB_TIMEOUT", "download_dir": "ZLIB_DOWNLOAD_DIR",
              "languages": "ZLIB_LANGUAGES", "formats": "ZLIB_FORMATS", "api_url": "ZLIB_API_URL",
-             "credentials_file": "ZLIB_CREDENTIALS"}
+             "credentials_file": "ZLIB_CREDENTIALS", "progress": "ZLIB_PROGRESS"}
 CONFIG_VARIABLE = "ZLIB_CONFIG"
 SECRET_KEYS = frozenset({"email", "password", "token", "api_token", "cookie", "cookies", "session", "secret"})
 DEFAULT_TIMEOUT = 30.0
@@ -39,7 +39,8 @@ LOCK_TIMEOUT = 5.0
 HEADER = '# zlib-cli settings. "zlib-cli config set" rewrites this file and drops comments.'
 SECRET_MESSAGE = "Credentials and session data are never stored in the config file."
 _DEFAULTS = {"domain": None, "timeout": DEFAULT_TIMEOUT, "download_dir": None, "languages": (), "formats": (),
-             "api_url": DEFAULT_API_URL, "credentials_file": None}
+             "api_url": DEFAULT_API_URL, "credentials_file": None, "progress": "auto"}
+PROGRESS_CHOICES = ("auto", "always", "never")
 
 
 class SettingsError(ValueError, Coded):
@@ -63,6 +64,7 @@ class Settings:
     formats: tuple = ()
     api_url: str = DEFAULT_API_URL
     credentials_file: Path | None = None
+    progress: str = "auto"  # auto (only in a terminal), always or never
     config_path: Path | None = None
     config_exists: bool = False
     config_source: str = "default"  # cli (--config), env (ZLIB_CONFIG) or default
@@ -171,6 +173,13 @@ def validate(key, value, *, source="config"):
         return _choices(value, formats=True)
     if key == "api_url":
         return _api_url(value)
+    if key == "progress":
+        if not isinstance(value, str):
+            raise TypeError
+        value = value.strip().lower()
+        if value not in PROGRESS_CHOICES:
+            raise ValueError("Choose auto, always or never.")
+        return value
     raise KeyError(key)
 
 
@@ -192,7 +201,7 @@ def parse_text(key, text):
 
 
 def check_key(key, *, source="cli"):
-    """Refuse a key that is not one of the seven, with the specific message for secret-looking keys."""
+    """Refuse a key that is not one of the known keys, with the specific message for secret-looking keys."""
     if key in KEYS:
         return key
     code = "invalid_argument" if source == "cli" else "config_invalid"
@@ -306,7 +315,7 @@ def _environment_value(key, environ):
 
 def load_settings(overrides=None, *, environ=None, config_file=None, use_config=True, missing_ok=False,
                   options=None) -> Settings:
-    """Resolve the seven keys: ``overrides`` (None means not given), environment, config file, default.
+    """Resolve every key: ``overrides`` (None means not given), environment, config file, default.
 
     ``config_file`` stands in for --config, ``use_config=False`` for --no-config (the file only is
     ignored). ``options`` names the CLI option of each override, for messages and origins.

@@ -1,7 +1,7 @@
 # zlib-cli: complete CLI implementation spec
 
-Design, 2026-11-11. Status on 2026-11-12: D1 and D2 implemented (see `docs/cli-json.md` and the Settings section of
-`docs/reference.md`); D3 to D7 not implemented yet. The owner decided the open questions on 2026-11-12 (section 10).
+Design, 2026-11-11. Status on 2026-11-13: D1 to D3 implemented (see `docs/cli-json.md` and the Settings section of
+`docs/reference.md`); D4 to D7 not implemented yet. The owner decided the open questions on 2026-11-12 (section 10).
 
 - **Request:** the owner's "cli complet" item: a coherent command set, JSON for every command (errors
   included), documented exit codes, a strict non-interactive mode, lists on standard input, messages kept
@@ -1001,7 +1001,7 @@ text above:
 
 ### D3. Help, examples and tables
 
-- [ ] **Root help.** `zlib-cli --help` groups the commands (`metavar="COMMAND"`, a description with
+- [x] **Root help.** `zlib-cli --help` groups the commands (`metavar="COMMAND"`, a description with
   `RawDescriptionHelpFormatter`):
 
   ```
@@ -1016,20 +1016,20 @@ text above:
   - The groups list only commands that exist at the time.
   - The epilog gives the exit codes, the config file location and the sentence `Scripts should use --json;
     text output may change.`
-- [ ] **No command or a mistyped command.** With no command, the grouped help goes to stderr (exit 2). A
+- [x] **No command or a mistyped command.** With no command, the grouped help goes to stderr (exit 2). A
   mistyped command gets `Did you mean: search?` from `difflib` (exit 2); `suggest_on_error` does not exist
   on Python 3.11.
-- [ ] **Command help.** Every command has a summary, a one-paragraph description and 2 to 4 examples under
+- [x] **Command help.** Every command has a summary, a one-paragraph description and 2 to 4 examples under
   `Examples:`.
   - The examples live in one table, `zlib_connector/cli_examples.py`.
   - A test parses every example with `parser()` and expects no error and no leftover argument.
-- [ ] **Option help.** Every option has help text.
+- [x] **Option help.** Every option has help text.
   - `--order` explains each token. `title` sorts Z to A, `titleA` A to Z, `filesize` largest first,
     `filesizeA` smallest first; `docs/reference.md` has the full list.
   - The metavars are `ID:HASH`, `BOOKLIST_ID`, `ENTRY_ID` and `TASK_ID`.
-- [ ] **ASCII text.** A test checks that every help string and every message the CLI writes itself is
+- [x] **ASCII text.** A test checks that every help string and every message the CLI writes itself is
   ASCII. The en dashes become `to`, and the `·` separators become two spaces.
-- [ ] **Tables.** `zlib_connector/cli_table.py` renders them with the standard library:
+- [x] **Tables.** `zlib_connector/cli_table.py` renders them with the standard library:
   - one header row, and columns separated by two spaces;
   - widths from `shutil.get_terminal_size()` only when stdout is a terminal;
   - only the title and author columns are truncated, with `...`;
@@ -1043,12 +1043,12 @@ text above:
    #  TITLE                    AUTHORS         YEAR  LANG     EXT   SIZE    REFERENCE
    1  Dune [saved]             Frank Herbert   1965  english  EPUB  1.2 MB  1234567:a1b2c3
   ```
-- [ ] **Profile.** `profile` prints labeled sections, so it no longer looks the same as `quota`.
-- [ ] **Quiet and progress options.** A global `--quiet` hides notes and progress but keeps errors and data.
+- [x] **Profile.** `profile` prints labeled sections, so it no longer looks the same as `quota`.
+- [x] **Quiet and progress options.** A global `--quiet` hides notes and progress but keeps errors and data.
   `--progress` and `--no-progress` become global. The `progress` key (`auto`, `always`, `never`) and
   `ZLIB_PROGRESS` are registered in `settings.KEYS`.
-- [ ] **`doctor` progress.** `doctor` shows `Checked N of M` in a terminal, with the batch ticker.
-- [ ] **Deprecated commands.** `check` and `auth-test` are hidden from help. Their behavior and JSON do not
+- [x] **`doctor` progress.** `doctor` shows `Checked N of M` in a terminal, with the batch ticker.
+- [x] **Deprecated commands.** `check` and `auth-test` are hidden from help. Their behavior and JSON do not
   change, and each prints one deprecation line on stderr: `check` points to `doctor DOMAIN`, `auth-test`
   to `login` then `status --verify`. They can be removed no earlier than one release after the notice.
 

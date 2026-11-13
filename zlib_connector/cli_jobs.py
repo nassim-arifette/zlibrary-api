@@ -6,6 +6,7 @@ from pathlib import Path
 import time
 
 from .cli_output import CommandError, print_json
+from .cli_table import print_table
 from .cli_settings import default_output, ensure_settings
 from .errors import NetworkError
 from .jobs.events import validate_event_id
@@ -28,8 +29,8 @@ def add_jobs_parser(commands):
             action.add_argument("reference", help="ID:HASH or a book URL on the server's selected domain")
             action.add_argument("--key", required=True, help="unique request key; reuse it only to replay the same submission")
         if name == "list":
-            action.add_argument("--limit", type=int, default=50)
-            action.add_argument("--offset", type=int, default=0)
+            action.add_argument("--limit", type=int, default=50, help="maximum tasks shown (default: 50)")
+            action.add_argument("--offset", type=int, default=0, help="tasks to skip, newest first (default: 0)")
         if name == "file":
             action.add_argument("--output", type=Path, help="existing directory for a validated local copy (default:"
                                 " the download_dir setting, else the current directory)")
@@ -100,8 +101,8 @@ def _run(args) -> int:
     if args.json:
         print_json(value)
     elif "tasks" in value:
-        for item in value["tasks"]:
-            print(f"{item['id']}  {item['state']:<14}  {item['reference']}")
+        print_table(("TASK_ID", "STATE", "REFERENCE"),
+                    [(item["id"], item["state"], item["reference"]) for item in value["tasks"]])
         print(f"{value['total']} task(s) in total.")
         if value.get("paused"):
             print("Queue paused by quota or rate limit. Use jobs resume when the allowance is available.")

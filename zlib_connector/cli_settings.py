@@ -43,11 +43,17 @@ def ensure_settings(args, *, environ=None):
     args.timeout = settings.timeout
     if hasattr(args, "api_url") and settings.origin("api_url") != "cli":
         args.api_url = settings.api_url
+    if getattr(args, "quiet", False):
+        args.progress = False
+    elif getattr(args, "progress", None) is None:
+        args.progress = {"always": True, "never": False}.get(settings.progress)
     return settings
 
 
 def notice(args, text: str) -> None:
     """Print one stderr notice, at most once per run."""
+    if getattr(args, "quiet", False):
+        return
     seen = getattr(args, "notices", None)
     if seen is None:
         seen = args.notices = set()

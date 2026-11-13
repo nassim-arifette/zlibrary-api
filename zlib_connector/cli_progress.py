@@ -81,3 +81,29 @@ class ProgressDisplay:
         self._rendered = value
         self._width = len(text)
         return True
+
+
+class Ticker:
+    """Overwrite one stderr line (``Checked 3 of 8``); a newline ends it on close."""
+
+    def __init__(self, enabled: bool, *, stream=None):
+        self.stream = sys.stderr if stream is None else stream
+        self.enabled, self.used = enabled, False
+
+    def __call__(self, text: str) -> None:
+        if self.enabled:
+            try:
+                self.stream.write("\r" + text)
+                self.stream.flush()
+                self.used = True
+            except (OSError, ValueError):
+                self.enabled = False
+
+    def close(self) -> None:
+        if self.used:
+            try:
+                self.stream.write("\n")
+                self.stream.flush()
+            except (OSError, ValueError):
+                pass
+            self.used = False

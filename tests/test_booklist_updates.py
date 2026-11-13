@@ -142,7 +142,9 @@ class BooklistUpdateCliTests(unittest.TestCase):
                 patch("zlib_connector.cli.load_credentials", return_value=Credentials(ORIGIN, "synthetic", "synthetic")), \
                 patch("sys.stdout", io.StringIO()) as output:
             self.assertEqual(main(["booklists", "show", "42"]), 0)
-        self.assertIn("Booklist entry: 987", output.getvalue())
+        header, row = output.getvalue().splitlines()[:2]
+        self.assertEqual("ENTRY", header.split()[-1])
+        self.assertEqual("987", row.split()[-1])
         self.assertIn("123:ab12", output.getvalue())
 
 

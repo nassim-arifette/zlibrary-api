@@ -33,7 +33,7 @@ class Client(HtmlClient):
         authentication-cookie rotation. This method makes no network request.
         """
         if not isinstance(key, str) or re.fullmatch(r"[A-Za-z0-9_-]{32,256}", key) is None:
-            raise ValueError("The account scope key must contain 32–256 URL-safe characters.")
+            raise ValueError("The account scope key must contain 32 to 256 URL-safe characters.")
         self._require_login()
         session = self._transport.export_session(self.domain)
         account_id = next(cookie.value for cookie in session.cookies if cookie.name == "remix_userid")

@@ -13,7 +13,7 @@ SEARCH_ORDERS = (
 
 def validate_search(query: str, page: int, limit: int) -> str:
     if not isinstance(query, str) or not 1 <= len(query.strip()) <= 500:
-        raise ValueError("Query must contain 1–500 characters.")
+        raise ValueError("Query must contain 1 to 500 characters.")
     validate_page(page, limit)
     return query.strip()
 
@@ -30,7 +30,7 @@ def _choices(values, *, formats=False) -> tuple[str, ...]:
     normalized = []
     for value in values:
         if not isinstance(value, str) or not value.isprintable() or not 1 <= len(value.strip()) <= 64:
-            raise ValueError("Filter values must contain 1–64 printable characters.")
+            raise ValueError("Filter values must contain 1 to 64 printable characters.")
         value = value.strip().lower()
         if formats and value not in SUPPORTED_FORMATS:
             raise ValueError("Supported formats: pdf, epub, djvu.")
