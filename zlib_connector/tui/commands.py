@@ -7,13 +7,13 @@ from textual.widgets import Input
 from textual.worker import Worker
 
 
-# Name, help text and app action. /similar and /refresh appear only where they apply.
+# Name, help text and app action. /similar, /download and /refresh appear only where they apply.
 COMMANDS = (("/search", "Search books", "search"), ("/favorites", "Saved books", "open_root('favorites')"),
             ("/booklists", "Your booklists", "open_root('booklists')"),
             ("/history", "Download history", "open_root('history')"),
             ("/popular", "Popular books", "open_root('popular')"),
             ("/recommended", "Recommended for you", "open_root('recommended')"),
-            ("/similar", "More like this", "similar"), ("/refresh", "Reload this page", "refresh"),
+            ("/similar", "More like this", "similar"), ("/download", "Download this book", "download"), ("/refresh", "Reload this page", "refresh"),
             ("/home", "Home", "home"), ("/help", "Keys and tips", "help"),
             ("/theme", "Change theme", "change_theme"), ("/quit", "Quit", "quit"))
 

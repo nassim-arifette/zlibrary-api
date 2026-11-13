@@ -137,7 +137,10 @@ class TUILaunchTests(unittest.TestCase):
                                  "--token-file", "chosen-token", "--view", "history", "--page-size", "7", "--no-color"])
                 self.assertEqual(0, code)
                 self.assertEqual(saved, os.environ.get("NO_COLOR"))
-                self.assertEqual((api, {"initial_view": "history", "page_size": 7}, "1"), seen[-1])
+                client, kwargs, color = seen[-1]
+                self.assertEqual((api, "1"), (client, color))
+                self.assertEqual({"initial_view": "history", "page_size": 7}, {k: kwargs[k] for k in ("initial_view", "page_size")})
+                self.assertIsInstance(kwargs["download_dir"], Path)
                 api_factory.assert_called_with("http://127.0.0.1:8910/v1", Path("chosen-token"), timeout=3)
         self.assertEqual(2, app.run.call_count)
 

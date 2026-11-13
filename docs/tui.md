@@ -3,8 +3,8 @@
 Browse your favorites, personal booklists and Z-Library download history, search
 the catalog with filters, and discover popular, recommended and similar books in
 an interactive terminal. Open a book for its description and metadata, then
-return to the same row. The TUI only reads: it does not change your account or
-start downloads. Collection editing and download-task views are planned.
+return to the same row. The TUI does not change your account. It downloads a book
+only when you press `d` and confirm. Collection editing is planned.
 
 ## Start
 
@@ -69,6 +69,7 @@ under its text.
 | `/popular` | Popular books |
 | `/recommended` | Recommended for you |
 | `/similar` | More like this; listed only when a book is selected or open |
+| `/download` | Download the selected or open book; listed only when downloads are available |
 | `/refresh` | Reload this page; listed on every page except Home and the search form |
 | `/home` | Home |
 | `/help` | Keys and tips |
@@ -98,6 +99,8 @@ In book lists:
 | ←/→ or `p`/`n` | Previous or next page, when the server reports one |
 | Enter | Book details (in Booklists, open the list) |
 | `m` | More like this: books similar to the selected book |
+| `d` | Download the selected book, after a confirmation |
+| `x` | Cancel the running download |
 | `r` | Refresh, or retry after an error |
 
 With a mouse, click a row to select it and click it again to open it.
@@ -164,6 +167,25 @@ language, ISBN-10 and ISBN-13, identifier, categories, saved state and book
 reference that the server provided, and the description, or a dimmed "No
 description available.". Esc returns to the list with its page, row and scroll
 position.
+
+## Download a book
+
+Press `d` on a selected book, in a list or on its details page. A dialog shows
+the title, format, size and the folder it will be saved in, and reminds you
+that it uses one download from your daily allowance. Enter on **Download**
+starts it; Esc cancels and nothing is sent.
+
+The book is saved into the `download_dir` setting (`zlib-cli config set
+download_dir DIR`), else your Downloads folder, else the current folder, under
+its title. A line at the bottom shows the progress, then where the file was
+saved or why it failed. `x` cancels the running download. One download runs at
+a time; a failure is shown and never retried on its own, so pressing `d` again
+is a new, explicit download.
+
+Quitting stops a running download: the first `q` warns you, a second one
+within five seconds quits. With the private server, unfinished downloads end
+with the session. A running `zlib-cli serve` must have downloads enabled
+(`--downloads` or `--download-dir DIR`); otherwise the TUI says so.
 
 ## Search
 

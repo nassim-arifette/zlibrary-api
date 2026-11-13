@@ -328,7 +328,8 @@ class LocalAPI:
             raise NetworkError("The local API returned an unexpected response.")
         return value
 
-    def file(self, identifier, folder):
+    def file(self, identifier, folder, *, title=None):
+        """Save a completed task's file in folder, named after title when given."""
         identifier = task_id(identifier)
         folder = Path(folder)
         if not folder.is_dir():
@@ -337,7 +338,7 @@ class LocalAPI:
             extension = _FILE_TYPES.get(response.headers.get_content_type())
             if extension is None or not 0 < size <= BOOK_LIMIT:
                 raise NetworkError("The local API returned an unsupported book file.")
-            return save_book("download-" + identifier, extension, folder,
+            return save_book(title or "download-" + identifier, extension, folder,
                              lambda stream: self._copy(response, size, deadline, stream.write))
 
 
