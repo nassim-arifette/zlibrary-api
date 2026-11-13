@@ -24,12 +24,13 @@ from .session_lock import PrivateLockError, PrivateLockTimeout, private_lock
 from .terminal_text import terminal_text
 
 
-KEYS = ("domain", "timeout", "download_dir", "languages", "formats", "api_url", "credentials_file", "progress", "proxy")
+KEYS = ("domain", "timeout", "download_dir", "languages", "formats", "api_url", "credentials_file", "progress", "proxy",
+        "confirm_downloads")
 LIST_KEYS = frozenset({"languages", "formats"})
 VARIABLES = {"domain": "ZLIB_DOMAIN", "timeout": "ZLIB_TIMEOUT", "download_dir": "ZLIB_DOWNLOAD_DIR",
              "languages": "ZLIB_LANGUAGES", "formats": "ZLIB_FORMATS", "api_url": "ZLIB_API_URL",
              "credentials_file": "ZLIB_CREDENTIALS", "progress": "ZLIB_PROGRESS",
-             "proxy": "ZLIB_PROXY"}
+             "proxy": "ZLIB_PROXY", "confirm_downloads": "ZLIB_CONFIRM_DOWNLOADS"}
 CONFIG_VARIABLE = "ZLIB_CONFIG"
 SECRET_KEYS = frozenset({"email", "password", "token", "api_token", "cookie", "cookies", "session", "secret"})
 DEFAULT_TIMEOUT = 30.0
@@ -40,7 +41,8 @@ LOCK_TIMEOUT = 5.0
 HEADER = '# zlib-cli settings. "zlib-cli config set" rewrites this file and drops comments.'
 SECRET_MESSAGE = "Credentials and session data are never stored in the config file."
 _DEFAULTS = {"domain": None, "timeout": DEFAULT_TIMEOUT, "download_dir": None, "languages": (), "formats": (),
-             "api_url": DEFAULT_API_URL, "credentials_file": None, "progress": "auto", "proxy": None}
+             "api_url": DEFAULT_API_URL, "credentials_file": None, "progress": "auto", "proxy": None,
+             "confirm_downloads": True}
 PROGRESS_CHOICES = ("auto", "always", "never")
 
 
@@ -67,6 +69,7 @@ class Settings:
     credentials_file: Path | None = None
     progress: str = "auto"  # auto (only in a terminal), always or never
     proxy: str | None = None  # http://HOST:PORT, used with HTTP CONNECT for the site only
+    confirm_downloads: bool = True  # the TUI asks before each download
     config_path: Path | None = None
     config_exists: bool = False
     config_source: str = "default"  # cli (--config), env (ZLIB_CONFIG) or default
@@ -182,6 +185,17 @@ def validate(key, value, *, source="config"):
         if value not in PROGRESS_CHOICES:
             raise ValueError("Choose auto, always or never.")
         return value
+    if key == "confirm_downloads":
+        if isinstance(value, bool):
+            return value
+        if not isinstance(value, str) or source == "config":
+            raise TypeError
+        text = value.strip().lower()
+        if text in ("true", "yes", "on", "1"):
+            return True
+        if text in ("false", "no", "off", "0"):
+            return False
+        raise ValueError("Choose true or false.")
     if key == "proxy":
         from .transport import validate_proxy
         if not isinstance(value, str):

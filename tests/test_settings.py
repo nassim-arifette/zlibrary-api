@@ -62,7 +62,7 @@ class PrecedenceTests(Folder):
     def test_defaults_without_file_or_environment(self):
         settings = load_settings(environ={})
         self.assertIsInstance(settings, Settings)
-        self.assertEqual((None, 30.0, None, (), (), "http://127.0.0.1:8000/v1", None, "auto", None),
+        self.assertEqual((None, 30.0, None, (), (), "http://127.0.0.1:8000/v1", None, "auto", None, True),
                          tuple(getattr(settings, key) for key in KEYS))
         self.assertTrue(all(settings.origins[key] == ("default", None) for key in KEYS))
         self.assertFalse(settings.config_exists)
@@ -76,27 +76,27 @@ class PrecedenceTests(Folder):
         file_values = {"domain": '"https://file.example/"', "timeout": "60", "download_dir": f'"{_toml(folder)}"',
                        "languages": '["english"]', "formats": '["epub"]', "api_url": '"http://127.0.0.1:9000"',
                        "credentials_file": f'"{_toml(creds)}"', "progress": '"never"',
-                       "proxy": '"http://127.0.0.1:3128"'}
+                       "proxy": '"http://127.0.0.1:3128"', "confirm_downloads": "false"}
         env = {"ZLIB_DOMAIN": "https://env.example", "ZLIB_TIMEOUT": "45", "ZLIB_DOWNLOAD_DIR": str(other),
                "ZLIB_LANGUAGES": "French, german", "ZLIB_FORMATS": "pdf,djvu", "ZLIB_API_URL": "http://localhost:9100/v1",
                "ZLIB_CREDENTIALS": str(other / "c.toml"), "ZLIB_PROGRESS": "Always",
-               "ZLIB_PROXY": "http://Proxy.example:8080/"}
+               "ZLIB_PROXY": "http://Proxy.example:8080/", "ZLIB_CONFIRM_DOWNLOADS": "Yes"}
         cli = {"domain": "https://cli.example/", "timeout": 5, "download_dir": folder, "languages": ["Spanish"],
                "formats": ["djvu"], "api_url": "http://127.0.0.1:9200", "credentials_file": Path("relative.toml"),
-               "proxy": "http://[::1]:3129"}
+               "proxy": "http://[::1]:3129", "confirm_downloads": False}
         self.write("\n".join(f"{key} = {value}" for key, value in file_values.items()))
         from_file = self.load()
         self.assertEqual(("https://file.example/", 60.0, folder, ("english",), ("epub",), "http://127.0.0.1:9000/v1",
-                          creds, "never", "http://127.0.0.1:3128"), tuple(getattr(from_file, key) for key in KEYS))
+                          creds, "never", "http://127.0.0.1:3128", False), tuple(getattr(from_file, key) for key in KEYS))
         self.assertTrue(all(from_file.origins[key] == ("config", None) for key in KEYS))
         from_env = self.load(environ=env)
         self.assertEqual(("https://env.example/", 45.0, other, ("french", "german"), ("pdf", "djvu"),
-                          "http://127.0.0.1:9100/v1", other / "c.toml", "always", "http://proxy.example:8080"),
+                          "http://127.0.0.1:9100/v1", other / "c.toml", "always", "http://proxy.example:8080", True),
                          tuple(getattr(from_env, key) for key in KEYS))
         self.assertEqual(("env", "ZLIB_LANGUAGES"), from_env.origins["languages"])
         from_cli = self.load(cli, env, options={"timeout": "--timeout"})
         self.assertEqual(("https://cli.example/", 5.0, folder, ("spanish",), ("djvu",), "http://127.0.0.1:9200/v1",
-                          Path("relative.toml").absolute(), "always", "http://[::1]:3129"),
+                          Path("relative.toml").absolute(), "always", "http://[::1]:3129", False),
                          tuple(getattr(from_cli, key) for key in KEYS))
         self.assertEqual(("cli", "--timeout"), from_cli.origins["timeout"])
 

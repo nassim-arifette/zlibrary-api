@@ -95,7 +95,7 @@ class ConfigCommandTests(unittest.TestCase):
         code, out, _ = self.run_cli("config", "list")
         rows = [line.split(maxsplit=1) for line in out.splitlines()]
         self.assertEqual(["domain", "https://z-lib.sk/"], rows[0])
-        self.assertEqual([["progress", "auto"], ["proxy", "(not set)"]], rows[-2:])
+        self.assertEqual([["progress", "auto"], ["proxy", "(not set)"], ["confirm_downloads", "true"]], rows[-3:])
         code, out, _ = self.run_cli("--timeout", "7", "config", "list", "--show-origin",
                                     environ={"ZLIB_LANGUAGES": "german"})
         lines = {line.split()[0]: line for line in out.splitlines()}

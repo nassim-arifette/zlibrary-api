@@ -63,8 +63,21 @@ def download_folder(args) -> Path:
     folder = configured_folder(args)
     if folder is not None:
         return folder
+    return fallback_folder()
+
+
+def fallback_folder() -> Path:
     downloads = Path.home() / "Downloads"
     return downloads if downloads.is_dir() else Path.cwd()
+
+
+def _config_store(args):
+    """The config file the settings page writes, or None with --no-config."""
+    if getattr(args, "no_config", False):
+        return None
+    from .settings import ConfigStore, config_file_path
+    path, source = config_file_path(getattr(args, "config", None))
+    return ConfigStore(path, source=source)
 
 
 def _run_app(args, CollectionsApp, api, download_dir):
@@ -74,7 +87,8 @@ def _run_app(args, CollectionsApp, api, download_dir):
     try:
         if args.no_color:
             os.environ["NO_COLOR"] = "1"
-        app = CollectionsApp(api, initial_view=args.view, page_size=args.page_size, download_dir=download_dir)
+        app = CollectionsApp(api, initial_view=args.view, page_size=args.page_size, download_dir=download_dir,
+                             settings=args.settings, config_store=_config_store(args), fallback_dir=fallback_folder())
     finally:
         if saved_no_color is None:
             os.environ.pop("NO_COLOR", None)

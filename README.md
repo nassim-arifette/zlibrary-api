@@ -202,7 +202,10 @@ The interface uses your saved session (run `zlib-cli login` once, or it asks for
 password). If a `zlib-cli serve` is already running, it uses that server; otherwise it starts a
 private one for the session and stops it when you quit.
 
-`d` on a book asks for confirmation, then downloads it into your `download_dir` setting (else your
+`,` opens Settings: download folder, whether to ask before each download, domain, timeout and
+proxy, saved in the same `config.toml` as `zlib-cli config`.
+
+`d` on a book asks for confirmation (unless you turned that off in Settings), then downloads it into your `download_dir` setting (else your
 Downloads folder) and shows the progress at the bottom; `x` cancels. Each confirmation is one
 download from your daily allowance, and a failed download is never retried on its own. With your
 own `zlib-cli serve`, downloads work too unless you started it with `--no-downloads`.
@@ -263,12 +266,13 @@ zlib-cli config unset formats
 `config set` saves a setting in `config.toml`: `%APPDATA%\zlibrary-api` on Windows,
 `~/.config/zlibrary-api` elsewhere (`$XDG_CONFIG_HOME/zlibrary-api` when it is set). The keys are
 `domain`, `timeout`, `download_dir`, `languages`, `formats`, `api_url`, `credentials_file`,
-`progress` (`auto`, `always` or `never`) and `proxy`. No
+`progress` (`auto`, `always` or `never`), `proxy` and `confirm_downloads` (the TUI asks before each
+download; `false` turns that off). The TUI's Settings page (`,`) edits the same file. No
 email, password, cookie or token is ever stored there.
 
 - An option given on the command line wins, then a `ZLIB_*` variable (`ZLIB_DOMAIN`, `ZLIB_TIMEOUT`,
   `ZLIB_DOWNLOAD_DIR`, `ZLIB_LANGUAGES`, `ZLIB_FORMATS`, `ZLIB_API_URL`, `ZLIB_CREDENTIALS`,
-  `ZLIB_PROGRESS`, `ZLIB_PROXY`; lists are
+  `ZLIB_PROGRESS`, `ZLIB_PROXY`, `ZLIB_CONFIRM_DOWNLOADS`; lists are
   comma-separated), then the file. `--no-config` ignores the file for one run, and `--config FILE`
   (or `ZLIB_CONFIG`) uses another file.
 - Saved formats and languages filter searches only, and each search says so on stderr; `--format`

@@ -142,6 +142,7 @@ Only `config set` and `config unset` create the default folder, with mode `0o700
 | `credentials_file` | string | absolute; must exist when used | `--credentials` | `ZLIB_CREDENTIALS` | the lookup below |
 | `progress` | string | `auto` (in a terminal), `always`, `never` | `--progress`, `--no-progress`; `--quiet` hides it | `ZLIB_PROGRESS` | `auto` |
 | `proxy` | string | `http://HOST:PORT`: no credentials, path or query; saved lowercased | `--proxy URL`, `--no-proxy` | `ZLIB_PROXY` | none (direct) |
+| `confirm_downloads` | boolean | the TUI asks before each download; `config set` and the variable take `true`/`false` (also `yes`/`no`, `on`/`off`, `1`/`0`) | none | `ZLIB_CONFIRM_DOWNLOADS` | `true` |
 
 The file is TOML 1.0 in UTF-8 (a BOM is accepted), at most 64 KiB, one flat table.
 Reading is strict: an unknown key, a table, a wrong type or a bad value stops every

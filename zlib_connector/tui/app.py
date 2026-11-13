@@ -22,6 +22,7 @@ from .downloads import DownloadDialog, DownloadRunner, DownloadTarget, DownloadU
 from .home import HomePage
 from .loader import BoundedLoader, LoadResult
 from .search import SearchForm
+from .settings import SettingsScreen
 from .views import (BOOK_KINDS, EMPTY, MAX_DEPTH, NO_DESCRIPTION, PAGE_KINDS, ROOTS, START_VIEWS, SearchRequest,
                     ViewState, book_meta, book_reference, booklist_meta, description_lines, detail_description,
                     detail_fields, detail_header, filters_text, fit_summary, format_label, literal, loading_text,
@@ -39,7 +40,7 @@ DETAIL_LABELS = ("Publisher", "Edition", "Pages", "Year", "Language", "ISBN-10",
                  "Categories", "Saved", "Reference")
 # Single-key shortcuts; the search page and the size prompt disable them.
 SHORTCUTS = {"open_root", "search", "similar", "previous_page", "next_page", "refresh", "quit_shortcut", "download",
-             "cancel_download"}
+             "cancel_download", "settings"}
 QUIT_AGAIN_SECONDS = 5
 
 
@@ -123,11 +124,13 @@ class CollectionsApp(App):
                 Binding("m", "similar", "More like this", show=False),
                 Binding("d", "download", "Download", show=False),
                 Binding("x", "cancel_download", "Cancel download", show=False),
+                Binding("comma", "settings", "Settings", show=False),
                 Binding("left,p", "previous_page", "Previous page", show=False),
                 Binding("right,n", "next_page", "Next page", show=False),
                 Binding("r", "refresh", "Refresh", show=False)]
 
-    def __init__(self, api, *, initial_view="home", page_size=20, download_dir=None):
+    def __init__(self, api, *, initial_view="home", page_size=20, download_dir=None, settings=None, config_store=None,
+                 fallback_dir=None):
         if initial_view not in START_VIEWS:
             raise ValueError("Choose home, favorites, booklists, history, search, popular or recommended.")
         validate_page(1, page_size)
@@ -151,6 +154,12 @@ class CollectionsApp(App):
         self._downloads = (None if download_dir is None else
                            DownloadRunner(api, download_dir, lambda update: self.post_message(DownloadProgress(update))))
         self._quit_armed = -QUIT_AGAIN_SECONDS - 1.0
+        # The settings page edits the config file through config_store; None makes it read-only.
+        from ..settings import Settings
+        self.settings = settings if settings is not None else Settings()
+        self.config_store = config_store
+        self.fallback_dir = fallback_dir if fallback_dir is not None else download_dir
+        self.confirm_downloads = self.settings.confirm_downloads
 
     @property
     def view(self) -> ViewState:
@@ -614,6 +623,10 @@ class CollectionsApp(App):
         # The help lists its keys under its text; this line would repeat them, half hidden by the box.
         if self.too_small or isinstance(dialog, HelpScreen):
             return []
+        if isinstance(dialog, SettingsScreen):
+            if dialog.store is None:
+                return [("esc", "close", 0)]
+            return [("↑↓", "field", 1), ("space", "toggle", 2), ("ctrl+s", "save", 0), ("esc", "cancel", 0)]
         if isinstance(dialog, DownloadDialog):
             return [("enter", "select", 0), ("←→", "choose", 1), ("esc", "cancel", 0)]
         if isinstance(dialog, CommandPalette):
@@ -764,7 +777,31 @@ class CollectionsApp(App):
         def confirmed(answer):
             if answer and not self._stopping and not self._downloads.active:
                 self._downloads.start(target)
+        if not self.confirm_downloads:
+            # The "Ask first" setting is off: d downloads at once.
+            confirmed(True)
+            return
         self.push_screen(DownloadDialog(target, self.download_dir), confirmed)
+
+    def action_settings(self):
+        if isinstance(self.screen, SettingsScreen):
+            return
+        where = str(self.config_store.path) if self.config_store is not None else ""
+        self.push_screen(SettingsScreen(self.settings, self.config_store, where=where), self._settings_saved)
+
+    def _settings_saved(self, result):
+        if not result or self._stopping:
+            return
+        settings, keys = result
+        self.settings = settings
+        if "download_dir" in keys:
+            self.download_dir = settings.download_dir or self.fallback_dir
+            if self._downloads is not None and self.download_dir is not None:
+                self._downloads.set_folder(self.download_dir)
+        if "confirm_downloads" in keys:
+            self.confirm_downloads = settings.confirm_downloads
+        later = [key for key in keys if key in ("domain", "timeout", "proxy")]
+        self._notice("✓ Settings saved" + (" · restart the TUI to use the new " + ", ".join(later) if later else ""))
 
     def action_cancel_download(self):
         if self._downloads is not None and self._downloads.active:

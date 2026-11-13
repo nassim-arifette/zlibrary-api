@@ -15,6 +15,7 @@ COMMANDS = (("/search", "Search books", "search"), ("/favorites", "Saved books",
             ("/recommended", "Recommended for you", "open_root('recommended')"),
             ("/similar", "More like this", "similar"), ("/download", "Download this book", "download"), ("/refresh", "Reload this page", "refresh"),
             ("/home", "Home", "home"), ("/help", "Keys and tips", "help"),
+            ("/settings", "Download folder, confirmation, domain…", "settings"),
             ("/theme", "Change theme", "change_theme"), ("/quit", "Quit", "quit"))
 
 
