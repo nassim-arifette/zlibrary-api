@@ -263,6 +263,7 @@ usual one-line startup refusal (exit 1).
 | `queue add` / `list` / `resume` | `{items: [{position, reference, key, task_id, state, code}], summary: {submitted, failed, uncertain, not_started}}` / as `jobs` |
 | `config path`, `list`, `get`, `set`, `unset` | See [Settings](#settings) |
 | `serve --json` | One NDJSON line once it listens: `{"event": "listening", "url": "http://127.0.0.1:PORT/v1", "token_file": ..., "downloads": false}`. The token is never printed |
+| `completion` | The shell script as text, even with `--json` |
 | `serve` (text), `shell`, `tui`, `mcp` | No data on stdout (`mcp` speaks JSON-RPC there) |
 
 ## Migration from earlier versions

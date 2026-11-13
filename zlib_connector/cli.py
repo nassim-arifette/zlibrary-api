@@ -15,6 +15,7 @@ from .pagination import validate_page
 from .my_library import validate_tags
 from .http_cli import run_server
 from .mcp_cli import run_mcp
+from .cli_completion import glue, run_complete
 from .cli_jobs import run_jobs, run_queue
 from .cli_tui import run_tui
 from .cli_progress import ProgressDisplay, Ticker
@@ -110,6 +111,8 @@ class _Operation:
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else list(argv)
     prepare_streams()
+    if argv[:1] == ["__complete"]:
+        return run_complete(argv[1:])  # Hidden; never loads settings, never reports errors.
     json_mode = wants_json(argv)
     operation = _Operation()
     try:
@@ -149,6 +152,9 @@ def _run(argv, operation) -> int:
         return run_mcp(args, client_factory=Client)  # Loads the settings itself; refusals keep their one line.
     if args.command == "config":
         return run_config(args)
+    if args.command == "completion":
+        sys.stdout.write(glue(args.shell))
+        return 0
     ensure_settings(args)
     policy = InputPolicy.from_args(args)
 

@@ -1,7 +1,7 @@
 # zlib-cli: complete CLI implementation spec
 
 Design, 2026-11-11. Status on 2026-11-13: D1 to D3 implemented (see `docs/cli-json.md` and the Settings section of
-`docs/reference.md`), D4 (see "Account changes in the CLI" in `docs/reference.md`) and D5; D6 and D7 not
+`docs/reference.md`), D4 (see "Account changes in the CLI" in `docs/reference.md`), D5 and D6; D7 not
 implemented yet. The owner decided the open questions on 2026-11-12 (section 10).
 
 - **Request:** the owner's "cli complet" item: a coherent command set, JSON for every command (errors
@@ -1116,7 +1116,7 @@ text above:
 
 ### D6. Shell completion (standard library only)
 
-- [ ] **Glue scripts.** `zlib-cli completion bash`, `zsh`, `fish` or `powershell` prints a glue script.
+- [x] **Glue scripts.** `zlib-cli completion bash`, `zsh`, `fish` or `powershell` prints a glue script.
   The CLI never edits a shell profile; the docs give the line to add:
 
   | Shell | Line to add | Mechanism |
@@ -1126,15 +1126,21 @@ text above:
   | fish | `zlib-cli completion fish > ~/.config/fish/completions/zlib-cli.fish` | `complete -c` (https://fishshell.com/docs/current/cmds/complete.html) |
   | PowerShell | `zlib-cli completion powershell \| Out-String \| Invoke-Expression` in `$PROFILE` | `Register-ArgumentCompleter -Native -CommandName zlib-cli` (https://learn.microsoft.com/powershell/module/microsoft.powershell.core/register-argumentcompleter) |
 
-- [ ] **`__complete`.** The glue calls a hidden command, `zlib-cli __complete SHELL -- WORDS...`.
+- [x] **`__complete`.** The glue calls a hidden command, `zlib-cli __complete SHELL -- WORDS...`.
   - It prints one candidate per line: commands, actions, options and choices (formats, orders, views,
     shells, config keys and their values).
   - Options that take a path fall back to the shell's file completion.
-- [ ] **Offline and side-effect free.** Completion never opens a connection. It never reads credentials,
+- [x] **Offline and side-effect free.** Completion never opens a connection. It never reads credentials,
   the session, the token or the config file, and never writes anything. Tests patch the network and file
   access to prove it. Version 1 completes neither booklist IDs nor task IDs.
-- [ ] **One source.** Completion is built from D3's command table rather than from argparse internals, and
+- [x] **One source.** Completion is built from D3's command table rather than from argparse internals, and
   is tested on Python 3.11 and 3.14. It works for the installed `zlib-cli`, not for `python -m`.
+- Implementation notes (2026-11-13): the tree comes from `parser()`, which D3's table annotates, and hidden
+  commands come from that table's `HIDDEN`; walking the parser keeps one source for options and choices.
+  bash calls `__complete bash --line=LINE` (its `COMP_WORDS` splits `https://...` and `--opt=value`) and gets
+  candidates without the text before the last `:` or `=`; PowerShell passes `--current=WORD` because
+  Windows PowerShell drops empty arguments. Verified by hand in bash 5, zsh 5, fish 3 and PowerShell 7; the
+  tests run bash and fish when they are installed.
 
 ### D7. HTTPS proxy
 

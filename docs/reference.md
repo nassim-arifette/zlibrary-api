@@ -96,6 +96,17 @@ any request and names the option to add (`--yes`, `--pick N`), or asks you to ru
 `ZLIB_DEBUG=1` is set. On Windows, set `PYTHONUTF8=1` for UTF-8 pipelines; without it,
 characters the console code page lacks appear as backslash escapes, and JSON is
 always ASCII-escaped.
+
+Shell completion: `zlib-cli completion bash|zsh|fish|powershell` prints a glue script (the
+README gives the line to add). The script calls the hidden command
+`zlib-cli __complete SHELL -- WORDS...`, which prints one candidate per line: commands,
+actions, options and the values of options with fixed choices, known domains, `config`
+keys and values. A path option prints `:files` and the script falls back to the shell's
+file completion. bash passes `--line=LINE` instead, because it splits words at `:` and
+`=`; PowerShell passes the word being typed as `--current=WORD`. `__complete` builds the
+tree from the parser and constants only: it never loads the settings, never reads the
+credentials, the session or the token, never opens a connection and never writes. It
+does not complete booklist IDs or task IDs.
 Optionally install the console entry point with `python -m pip install -e .` and
 use `zlib-cli` with the same arguments. Installation is not needed for `python -m`.
 

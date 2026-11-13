@@ -278,6 +278,22 @@ email, password, cookie or token is ever stored there.
 
 The [technical reference](docs/reference.md#settings) has every rule.
 
+## Shell completion
+
+`zlib-cli completion SHELL` prints a completion script; add the line for your shell yourself, the CLI never
+edits a profile:
+
+| Shell | Line to add |
+|---|---|
+| bash | `eval "$(zlib-cli completion bash)"` in `~/.bashrc` |
+| zsh | `eval "$(zlib-cli completion zsh)"` in `~/.zshrc`, after `compinit` |
+| fish | `zlib-cli completion fish > ~/.config/fish/completions/zlib-cli.fish` |
+| PowerShell | `zlib-cli completion powershell \| Out-String \| Invoke-Expression` in `$PROFILE` |
+
+Tab completes commands, actions, options, formats, orders, views, domains and `config` keys and values, and
+falls back to file names for path options. It works offline and never reads your settings, session or
+credentials. It needs the installed `zlib-cli` (`python -m pip install -e .`), not `python -m`.
+
 ## Use it in scripts
 
 - Results go to stdout; prompts, progress and errors go to stderr. `--json` gives JSON results and

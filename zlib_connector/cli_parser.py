@@ -15,6 +15,7 @@ from .search import SEARCH_ORDERS
 from .http_cli import add_serve_parser
 from .mcp_cli import add_mcp_parser
 from .cli_session import add_session_options
+from .cli_completion import SHELLS
 from .cli_jobs import add_jobs_parser, add_queue_parser
 from .cli_tui import add_tui_parser
 from .cli_batch import add_batch_options
@@ -164,6 +165,8 @@ def parser() -> argparse.ArgumentParser:
     add_queue_parser(commands)
     add_jobs_parser(commands)
     add_tui_parser(commands)
+    completion = commands.add_parser("completion", help="print a shell completion script")
+    completion.add_argument("shell", choices=SHELLS, help="bash, zsh, fish or powershell")
     for name in ("search", "download"):
         command = commands.add_parser(name)
         if name == "search":

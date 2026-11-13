@@ -83,6 +83,10 @@ COMMANDS = {
               ("serve", "serve --port 8080 --downloads", "serve --port 0 --downloads --json", "serve --anonymous")),
     "tui": ("interactive terminal interface", "Browse collections, search and discover books in a terminal UI.",
             ("tui", "tui --view search", "tui --api-url http://127.0.0.1:8000/v1")),
+    "completion": ("print a shell completion script",
+                   "Print the completion glue for bash, zsh, fish or PowerShell. The CLI never edits a shell profile;"
+                   " add the line from the comment at the top of the script yourself.",
+                   ('completion bash', "completion fish", "completion powershell")),
     "shell": ("interactive search and download loop", "Log in once, then search and download repeatedly.",
               ("shell", "shell --no-progress")),
     "mcp": ("MCP server for AI assistants", "Serve MCP tools over stdio. Read-only unless downloads or changes are enabled.",
