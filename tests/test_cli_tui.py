@@ -156,3 +156,63 @@ class TUILaunchTests(unittest.TestCase):
             self.assertIn("--token-file", errors.getvalue())
             self.assertNotIn(str(missing), errors.getvalue())
             self.assertFalse(missing.exists())
+
+
+class PrivateServerTests(unittest.TestCase):
+    """Without a running server, the TUI starts a private one for its session and stops it on exit."""
+
+    def launch(self, argv, *, listening):
+        events = []
+        ui_module, catalog_module = types.ModuleType("zlib_connector.tui.app"), types.ModuleType("zlib_connector.catalog_api")
+        app = Mock()
+        app.run.side_effect = lambda: events.append("app ran")
+        ui_module.CollectionsApp = Mock(return_value=app)
+        catalog_module.CatalogAPI = Mock()
+        modules = {"zlib_connector.tui": types.ModuleType("zlib_connector.tui"),
+                   "zlib_connector.tui.app": ui_module, "zlib_connector.catalog_api": catalog_module}
+        server = Mock(server_address=("127.0.0.1", 54321))
+        server.__enter__ = Mock(return_value=server)
+        server.__exit__ = Mock(side_effect=lambda *_: events.append("server closed"))
+        server.shutdown.side_effect = lambda: events.append("server stopped")
+        server.serve_forever.side_effect = lambda: events.append("serving")
+        client = Mock()
+        client.__enter__ = Mock(return_value=client)
+        client.__exit__ = Mock(return_value=False)
+        account = Mock(domain="https://example.invalid")
+        account.authenticate.side_effect = lambda *_, **__: events.append("signed in")
+        with tempfile.TemporaryDirectory() as folder, patch.dict(sys.modules, modules), \
+                patch.dict(os.environ, {"ZLIB_NO_CONFIG": "1"}), \
+                redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()), terminal(), \
+                patch("zlib_connector.cli_tui.state_directory", return_value=Path(folder)), \
+                patch("zlib_connector.cli_tui._listening", return_value=listening), \
+                patch("zlib_connector.http_api.create_server", return_value=server) as create, \
+                patch("zlib_connector.eapi.Client", return_value=client), \
+                patch("zlib_connector.api_token.load_api_token", return_value="t" * 43), \
+                patch("zlib_connector.cli_session.AccountSession", return_value=account):
+            code = main(["--no-config", *argv])
+            token_file = Path(folder) / "api-token"
+        return code, events, create, catalog_module.CatalogAPI, token_file
+
+    def test_no_running_server_starts_a_private_one_for_the_session(self):
+        code, events, create, api_factory, token_file = self.launch(["tui"], listening=False)
+        self.assertEqual(0, code)
+        self.assertEqual(0, create.call_args.kwargs["port"])
+        self.assertEqual("127.0.0.1", create.call_args.kwargs["host"])
+        api_factory.assert_called_once()
+        self.assertEqual(("http://127.0.0.1:54321/v1", token_file), api_factory.call_args.args)
+        self.assertEqual(["signed in", "app ran", "server stopped", "server closed"],
+                         [event for event in events if event != "serving"])
+
+    def test_a_running_server_is_reused(self):
+        code, events, create, api_factory, _ = self.launch(["tui"], listening=True)
+        self.assertEqual(0, code)
+        create.assert_not_called()
+        self.assertEqual(["app ran"], events)
+
+    def test_an_explicit_server_or_the_opt_out_never_starts_one(self):
+        for argv in (["tui", "--no-auto-server"], ["tui", "--api-url", "http://127.0.0.1:8911/v1"],
+                     ["tui", "--token-file", "chosen-token"]):
+            with self.subTest(argv=argv):
+                code, events, create, _, _ = self.launch(argv, listening=False)
+                self.assertEqual(0, code)
+                create.assert_not_called()

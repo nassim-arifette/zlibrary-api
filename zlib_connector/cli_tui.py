@@ -1,7 +1,10 @@
-"""Optional terminal interface, connected only to an existing local API."""
+"""Optional terminal interface over the local API; starts a private one when none is running."""
+from contextlib import contextmanager
 import os
 from pathlib import Path
+import socket
 import sys
+import threading
 
 from . import cli_terminal
 from .cli_output import CommandError, InputRequired
@@ -16,8 +19,11 @@ VIEWS = ("home", "favorites", "booklists", "history", "search", "popular", "reco
 def add_tui_parser(commands):
     command = commands.add_parser("tui", help="browse collections, search and discover books in an interactive terminal")
     command.add_argument("--api-url", help="running loopback HTTP API address (default: the api_url setting, else"
-                         " http://127.0.0.1:8000/v1)")
+                         " http://127.0.0.1:8000/v1); when no server answers there and neither --api-url nor"
+                         " --token-file is given, the TUI starts a private server for this session")
     command.add_argument("--token-file", type=Path, help="existing server token file (default: state directory/api-token)")
+    command.add_argument("--no-auto-server", action="store_true",
+                         help="never start a private server; connect only to a running zlib-cli serve")
     command.add_argument("--view", choices=VIEWS, default="home",
                          help="starting page; home reads nothing and search opens the search form (default: home)")
     command.add_argument("--page-size", type=int, default=20, help="favorites, history and search page size, 1-50 (default: 20)")
@@ -40,11 +46,17 @@ def run_tui(args):
         raise
     from .catalog_api import CatalogAPI
 
-    try:
-        api = CatalogAPI(args.api_url, args.token_file or state_directory() / "api-token", timeout=args.timeout)
-    except OSError:
-        raise CommandError("Could not read the local API token. Start zlib-cli serve or select its existing token file"
-                           " with --token-file.", code="local_api_unavailable") from None
+    token_file = args.token_file or state_directory() / "api-token"
+    with _server_for(args, token_file) as url:
+        try:
+            api = CatalogAPI(url, token_file, timeout=args.timeout)
+        except OSError:
+            raise CommandError("Could not read the local API token. Start zlib-cli serve or select its existing token"
+                               " file with --token-file.", code="local_api_unavailable") from None
+        _run_app(args, CollectionsApp, api)
+
+
+def _run_app(args, CollectionsApp, api):
     # Textual reads NO_COLOR when constructing App. Apply the per-launch
     # option without changing the caller's environment after construction.
     saved_no_color = os.environ.get("NO_COLOR")
@@ -58,3 +70,53 @@ def run_tui(args):
         else:
             os.environ["NO_COLOR"] = saved_no_color
     app.run()
+
+
+def _listening(url) -> bool:
+    """True when something accepts connections at the API address; a bad address is left to the client."""
+    from .local_api import _address
+    try:
+        host, port = _address(url)
+    except ValueError:
+        return True
+    try:
+        with socket.create_connection((host, port), timeout=0.5):
+            return True
+    except OSError:
+        return False
+
+
+@contextmanager
+def _server_for(args, token_file):
+    """Yield the API address: the running server's, or a private one that lives as long as the TUI.
+
+    An explicit --api-url or --token-file names an existing server, so it is never replaced.
+    """
+    if (getattr(args, "no_auto_server", False) or args.token_file is not None
+            or args.settings.origin("api_url") == "cli" or _listening(args.api_url)):
+        yield args.api_url
+        return
+    from .api_token import load_api_token
+    from .cli_session import AccountSession
+    from .cli_settings import client_factory
+    from .cli_terminal import InputPolicy
+    from .credentials import load_credentials
+    from .eapi import Client
+    from .http_api import create_server
+    from .http_cli import _password_prompt, _prompt
+
+    token = load_api_token(token_file)
+    account = AccountSession(args, credentials_loader=load_credentials)
+    account.require_input(InputPolicy.from_args(args), explicit=False)
+    print("Starting a private local server for this session...", file=sys.stderr, flush=True)
+    with client_factory(args, Client)(account.domain, timeout=args.timeout) as client:
+        with create_server(client, token=token, host="127.0.0.1", port=0) as server:
+            account.authenticate(client, prompt=_prompt, password_prompt=_password_prompt)
+            worker = threading.Thread(target=server.serve_forever, name="tui-local-api", daemon=True)
+            worker.start()
+            try:
+                address, port = server.server_address[:2]
+                yield f"http://{address}:{port}/v1"
+            finally:
+                server.shutdown()
+                worker.join(5)

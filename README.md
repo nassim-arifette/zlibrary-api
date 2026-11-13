@@ -191,16 +191,16 @@ zlib-cli tags add ID:HASH "To read" "Science"
 
 An optional terminal interface lets you search the catalog with filters, see popular, recommended
 and similar books, and browse your favorites, booklists and download history. It only reads: it
-does not change your account or start downloads. It talks to the local HTTP API, so start a
-signed-in server (not `--anonymous`), then the interface in a second terminal with the virtual
-environment active.
+does not change your account or start downloads. One command is enough:
 
 ```sh
 python -m pip install -e ".[tui]"
-zlib-cli serve
-# in a second terminal:
 zlib-cli tui
 ```
+
+The interface uses your saved session (run `zlib-cli login` once, or it asks for your email and
+password). If a `zlib-cli serve` is already running, it uses that server; otherwise it starts a
+private one for the session and stops it when you quit.
 
 ![The terminal interface showing a favorites list, with the selected book's details above it](docs/images/tui.png)
 

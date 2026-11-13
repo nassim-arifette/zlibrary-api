@@ -14,24 +14,23 @@ From the project folder:
 python -m pip install -e ".[tui]"
 ```
 
-In one terminal, start the authenticated local API:
-
-```sh
-zlib-cli serve
-```
-
-Keep that terminal open. In a second terminal:
+Then start it:
 
 ```sh
 zlib-cli tui
 ```
 
-`serve` handles your Z-Library session. The TUI reads its existing local bearer
-token and connects only to the loopback API. It does not ask for your Z-Library
-password, start a server, follow redirects or use HTTP proxy settings.
+The TUI talks to the local HTTP API. If a `zlib-cli serve` already answers at
+the configured address, it uses it. Otherwise it starts a private server inside
+the same process for this session, signed in with your saved session (or after
+asking for your email and password in the terminal), and stops it when you
+quit. That private server listens on a random loopback port and is not shared
+with other programs; run `zlib-cli serve` yourself if you want one server for
+the TUI, scripts and the MCP server. `--no-auto-server` turns the private
+server off.
 
-For a different server address or token file, pass the same values you chose
-when starting the server:
+To use a server started with a different address or token file, pass the same
+values; the TUI then never starts its own:
 
 ```sh
 zlib-cli tui --api-url http://127.0.0.1:8123/v1 --token-file ./api-token
@@ -249,7 +248,7 @@ background; press `r` to try again.
 | --- | --- |
 | Optional terminal interface is missing | Install `.[tui]` with the same Python interpreter used to launch the CLI. |
 | An interactive terminal is required | Run the command in a terminal; use the CLI commands with `--json` for pipes and scripts. |
-| Token file is missing or refused | Start `zlib-cli serve` and select its existing token file. |
+| Token file is missing or refused | Run `zlib-cli tui` without `--api-url` and `--token-file`, or start `zlib-cli serve` and select its token file. |
 | Could not reach the server | Check that the server is running and that its address matches `--api-url`. |
 | The server has no signed-in Z-Library session | Run `zlib-cli login` if needed, then restart `zlib-cli serve` without `--anonymous` and press `r`. |
 | The local API rejected this request | Press `s` to change the search text or filters, then search again. |
